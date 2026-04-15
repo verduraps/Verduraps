@@ -1,11 +1,6 @@
-const CACHE = 'verdapp-v7';
-const BASE = '/Verduraps';
-const ASSETS = [
-  BASE + '/index.html',
-  BASE + '/manifest.json',
-  BASE + '/icon-192.png',
-  BASE + '/icon-512.png'
-];
+const CACHE = 'verdapp-v12';
+const BASE = '';
+const ASSETS = ['/', '/index.html', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(
