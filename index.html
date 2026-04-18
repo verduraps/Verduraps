@@ -4,7 +4,7 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
   <title>VerdApp</title>
-  <link rel="manifest" href="/manifest.json"/>
+  <link rel="manifest" href="manifest.json"/>
   <meta name="theme-color" content="#0a1a0a"/>
   <meta name="mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -1908,19 +1908,25 @@ function balanceDia(fecha){
    TAB BALANCE
 ═══════════════════════════════════════════════════════ */
 function pgBalance(){
-  const s  = semana();
-  const bHoy = calcBalance(iso=>iso===hoy());
-  const bSem = calcBalance(enSem);
-  const bMes = calcBalance(iso=>enMes(iso,0));
-  const bMesAnt = calcBalance(iso=>enMes(iso,-1));
-
-  // Balance por día de la semana actual
+  const s = semana();
+  // Semana lunes-sábado (sin domingo)
   const diasSem = [];
-  for(let i=0;i<7;i++){
+  for(let i=0;i<6;i++){
     const d=new Date(s.ini+'T12:00');
     d.setDate(d.getDate()+i);
     diasSem.push(toISO(d));
   }
+
+  // Calcular balances
+  const bHoy = calcBalance(iso=>iso===hoy());
+  const bSem = calcBalance(iso=>diasSem.includes(iso));
+  const bMes = calcBalance(iso=>enMes(iso,0));
+  const bMesAnt = calcBalance(iso=>enMes(iso,-1));
+
+  // Rango personalizado
+  const iniPer = window.balIni || s.ini;
+  const finPer = window.balFin || s.fin;
+  const bPer = calcBalance(iso=>iso>=iniPer&&iso<=finPer);
 
   const filaDia = diasSem.map(f=>{
     const b=calcBalance(iso=>iso===f);
@@ -1946,13 +1952,38 @@ function pgBalance(){
   <!-- HOY -->
   ${balanceCard('HOY — '+lbl(hoy()), bHoy)}
 
-  <!-- SEMANA -->
-  ${balanceCard('SEMANA · '+lbl(s.ini)+' → '+lbl(s.fin), bSem,
+  <!-- SEMANA LUNES-SÁBADO -->
+  ${balanceCard('SEMANA LUN→SÁB · '+lbl(s.ini)+' → '+lbl(diasSem[5]), bSem,
     `<div style="margin-top:12px">
       <div style="font-family:var(--mono);font-size:.7rem;color:var(--txt3);margin-bottom:8px;letter-spacing:1px">DETALLE POR DÍA</div>
       ${filaDia}
     </div>`
   )}
+
+  <!-- PERÍODO PERSONALIZADO -->
+  <div class="card">
+    <div class="ct">📅 PERÍODO PERSONALIZADO</div>
+    <div class="g2" style="margin-bottom:10px">
+      <div><label>DESDE</label>
+        <input type="date" id="bal-ini" value="${iniPer}"
+          onchange="window.balIni=this.value;render()"/>
+      </div>
+      <div><label>HASTA</label>
+        <input type="date" id="bal-fin" value="${finPer}"
+          onchange="window.balFin=this.value;render()"/>
+      </div>
+    </div>
+    <div style="background:var(--bg3);border-radius:10px;padding:12px">
+      <div class="sr"><span class="sl">Ventas</span><span class="sv pos">${fm(bPer.tv)}</span></div>
+      <div class="sr"><span class="sl">Compras</span><span class="sv neg">- ${fm(bPer.deuda)}</span></div>
+      <div class="sr"><span class="sl">Gastos</span><span class="sv neg">- ${fm(bPer.tg)}</span></div>
+      <div class="sr" style="border-top:2px solid var(--border);padding-top:10px;margin-top:4px">
+        <span class="sl" style="font-weight:700">RESULTADO</span>
+        <span class="sv ${bPer.res>=0?'pos':'neg'}" style="font-size:1.3rem">${fm(bPer.res)}</span>
+      </div>
+      ${bPer.margenPct?`<div class="sr"><span class="sl">Margen</span><span class="sv ${bPer.res>=0?'pos':'neg'}">${bPer.margenPct}%</span></div>`:''}
+    </div>
+  </div>
 
   <!-- MES ACTUAL -->
   ${balanceCard('MES ACTUAL — '+getMes(0).nombre, bMes)}
@@ -1978,7 +2009,7 @@ setTimeout(checkAlertasPrecios, 1000);
 // Service Worker
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
+    navigator.serviceWorker.register('./sw.js')
       .then(reg => console.log('SW registrado', reg.scope))
       .catch(err => console.error('SW error', err));
   });
