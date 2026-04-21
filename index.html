@@ -167,6 +167,7 @@
     <button class="tab"     onclick="go('resumen')">📊 RESUMEN</button>
     <button class="tab"     onclick="go('pendientes')">⏳ PEND.</button>
     <button class="tab"     onclick="go('balance')">📈 BALANCE</button>
+    <button class="tab"     onclick="go('cierre')">📋 CIERRE</button>
     <button class="tab"     onclick="go('memoria')">🧠 MEMORIA</button>
   </nav>
   <div id="pg"></div>
@@ -219,13 +220,14 @@ const WA_NOMBRES = ['0991378503','0991656990','0983493424'];
 ═══════════════════════════════════════════════════════ */
 const KEY_GESTION = 'verdapp_v4';
 const KEY_PESOS   = 'verdapp_pesos_v2';
-const KEY_PRECIOS = 'verdapp_precios_v1'; // memoria de precios aprendidos
+const KEY_PRECIOS = 'verdapp_precios_v1'; // memoria de precios
+const KEY_WMEM    = 'verdapp_wmem_v1';    // memoria de pesos
 
 let db = {compras:[],gastos:[],ventas:[]};
-let pesoRows = []; // [{producto, pesoTotal, pesoCaja, pesoNeto, precioCompra, precioVenta}]
+let pesoRows = [];
 let margen = 1.3;
-// Memoria de precios: {nombreNorm: {precios:[...ultimos 10], min, max, avg, total_registros}}
 let priceMemory = {};
+let weightMemory = {}; // {nombreNorm: {pesos:[{v,fecha}], min, max, avg, total}}
 
 function loadAll() {
   try { const r=localStorage.getItem(KEY_GESTION); if(r) db=JSON.parse(r); } catch(e){}
@@ -238,6 +240,7 @@ function loadAll() {
     }
   } catch(e){}
   try { const r=localStorage.getItem(KEY_PRECIOS); if(r) priceMemory=JSON.parse(r); } catch(e){}
+  try { const r=localStorage.getItem(KEY_WMEM);    if(r) weightMemory=JSON.parse(r); } catch(e){}
   if(!pesoRows.length) initPesoRows();
 }
 
@@ -264,6 +267,49 @@ function aprenderPrecio(nombre, precioUnit, tipo) {
     mem.tipoDefault = Object.entries(mem.tipos).sort((a,b)=>b[1]-a[1])[0][0];
   }
   localStorage.setItem(KEY_PRECIOS, JSON.stringify(priceMemory));
+}
+
+/* ── Memoria de PESOS ── */
+function aprenderPeso(nombre, pesoTotal, pesoNeto) {
+  const pt = parseFloat(pesoTotal); const pn = parseFloat(pesoNeto);
+  if(!nombre || !pt || pt <= 0) return;
+  const key = normalizarTexto(nombre).slice(0,20);
+  if(!weightMemory[key]) weightMemory[key] = {pesos:[], total:0};
+  const mem = weightMemory[key];
+  mem.pesos.push({pt, pn: pn||0, fecha: hoy()});
+  if(mem.pesos.length > 10) mem.pesos.shift();
+  const vals = mem.pesos.map(p=>p.pt);
+  mem.min = Math.min(...vals);
+  mem.max = Math.max(...vals);
+  mem.avg = parseFloat((vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(3));
+  mem.total = (mem.total||0) + 1;
+  localStorage.setItem(KEY_WMEM, JSON.stringify(weightMemory));
+}
+
+function detectarVariacionPeso(nombre, pesoNuevo) {
+  if(!pesoNuevo || pesoNuevo <= 0) return null;
+  const key = normalizarTexto(nombre).slice(0,20);
+  const mem = weightMemory[key];
+  if(!mem || mem.pesos.length < 2) return null;
+  const anterior = mem.pesos[mem.pesos.length-1].pt;
+  if(!anterior) return null;
+  const variacion = ((pesoNuevo - anterior) / anterior) * 100;
+  if(Math.abs(variacion) < 15) return null; // umbral 15% para pesos
+  return {anterior, nuevo: pesoNuevo, pct: Math.round(variacion), sube: variacion > 0};
+}
+
+function olvidarPeso(key) {
+  if(!confirm('Olvidar los pesos aprendidos de "'+key+'"?')) return;
+  delete weightMemory[key];
+  localStorage.setItem(KEY_WMEM, JSON.stringify(weightMemory));
+  toast('Eliminado');render();
+}
+
+function limpiarMemoriaPesos() {
+  if(!confirm('Borrar TODA la memoria de pesos aprendidos?')) return;
+  weightMemory = {};
+  localStorage.setItem(KEY_WMEM, JSON.stringify(weightMemory));
+  toast('Memoria de pesos borrada');render();
 }
 
 /* ── Obtener tipo aprendido para un producto ── */
@@ -561,7 +607,7 @@ function updateHdr(){
 let tab='pesos';
 function go(t){
   tab=t;
-  const ns=['pesos','ia','compras','gastos','ventas','resumen','pendientes','balance','memoria'];
+  const ns=['pesos','ia','compras','gastos','ventas','resumen','pendientes','balance','cierre','memoria'];
   document.querySelectorAll('.tab').forEach((b,i)=>b.classList.toggle('on',ns[i]===t));
   render();
 }
@@ -576,6 +622,7 @@ function render(){
   else if(tab==='resumen')p.innerHTML=pgResumen();
   else if(tab==='pendientes')p.innerHTML=pgPendientes();
   else if(tab==='balance')p.innerHTML=pgBalance();
+  else if(tab==='cierre') p.innerHTML=pgCierre();
   else if(tab==='memoria')p.innerHTML=pgMemoria();
   bindForms();
 }
@@ -667,25 +714,52 @@ function pgPesos(){
     <div class="ct">📲 ENVIAR POR WHATSAPP</div>
     <div style="margin-bottom:12px">
       <label>LISTA DE PRECIOS</label>
-      <textarea readonly style="min-height:100px;font-size:.75rem">${msgPrecios}</textarea>
+      <textarea id="wa-precios" readonly style="min-height:100px;font-size:.75rem">${msgPrecios}</textarea>
     </div>
     <div style="margin-bottom:14px">
-      ${WA_NUMS.map((n,i)=>`<a class="wa-btn" href="https://wa.me/${n}?text=${encodeURIComponent(msgPrecios)}" target="_blank">📱 Precios al ${WA_NOMBRES[i]}</a>`).join('')}
+      ${WA_NUMS.map((n,i)=>`<button class="wa-btn" onclick="abrirWA('${n}','precios')">📱 Precios al ${WA_NOMBRES[i]}</button>`).join('')}
     </div>
     <div style="margin-bottom:12px">
       <label>LISTA DE PESOS</label>
-      <textarea readonly style="min-height:100px;font-size:.75rem">${msgPesos}</textarea>
+      <textarea id="wa-pesos" readonly style="min-height:100px;font-size:.75rem">${msgPesos}</textarea>
     </div>
     <div>
-      ${WA_NUMS.map((n,i)=>`<a class="wa-btn" href="https://wa.me/${n}?text=${encodeURIComponent(msgPesos)}" target="_blank" style="background:#128c7e">📱 Pesos al ${WA_NOMBRES[i]}</a>`).join('')}
+      ${WA_NUMS.map((n,i)=>`<button class="wa-btn" style="background:#128c7e" onclick="abrirWA('${n}','pesos')">📱 Pesos al ${WA_NOMBRES[i]}</button>`).join('')}
     </div>
   </div>`;
 }
 
 function actualizarFila(i){
-  pesoRows[i].pesoNeto=calcPesoNeto(pesoRows[i].pesoTotal,pesoRows[i].pesoCaja);
-  pesoRows[i].precioVenta=calcVenta(pesoRows[i].pesoTotal,pesoRows[i].pesoCaja,pesoRows[i].precioCompra);
+  const r = pesoRows[i];
+  const ptAntes = parseFloat(r.pesoTotal);
+  r.pesoNeto = calcPesoNeto(r.pesoTotal, r.pesoCaja);
+  r.precioVenta = calcVenta(r.pesoTotal, r.pesoCaja, r.precioCompra);
   savePesos();
+  // Detectar variacion de peso >= 15% y mostrar alerta inline
+  if(r.pesoTotal && parseFloat(r.pesoTotal) > 0) {
+    const varPeso = detectarVariacionPeso(r.producto, parseFloat(r.pesoTotal));
+    if(varPeso) {
+      const rows2 = document.querySelectorAll('.peso-table tbody tr');
+      if(rows2[i]) {
+        const existente = rows2[i].querySelector('.alerta-peso');
+        if(!existente) {
+          const td = document.createElement('td');
+          td.className = 'alerta-peso';
+          td.colSpan = 6;
+          td.style.cssText = 'padding:4px 8px;background:'+(varPeso.sube?'rgba(248,113,113,.12)':'rgba(74,222,128,.08)')+';border-radius:6px';
+          td.innerHTML = '<span style="font-family:var(--mono);font-size:.65rem;color:'+(varPeso.sube?'var(--danger)':'#4ade80')+';font-weight:700">'+(varPeso.sube?'▲ SUBE':'▼ BAJA')+' '+Math.abs(varPeso.pct)+'% peso &mdash; antes: '+varPeso.anterior+'kg &rarr; ahora: '+varPeso.nuevo+'kg</span>';
+          const newRow = rows2[i].parentNode.insertRow(rows2[i].rowIndex);
+          newRow.className = 'fila-alerta-peso';
+          newRow.appendChild(td);
+          // Aprender el nuevo peso despues de mostrar la alerta
+          aprenderPeso(r.producto, r.pesoTotal, r.pesoNeto);
+        }
+      }
+    } else {
+      // Sin variacion anomala: aprender silenciosamente
+      aprenderPeso(r.producto, r.pesoTotal, r.pesoNeto);
+    }
+  }
   // Actualizar solo las celdas calculadas sin re-renderizar toda la tabla
   const rows=document.querySelectorAll('.peso-table tbody tr');
   if(rows[i]){
@@ -694,16 +768,30 @@ function actualizarFila(i){
     if(cells[1]) cells[1].textContent=pesoRows[i].precioVenta?pesoRows[i].precioVenta+' Gs/kg':'—';
   }
   // Actualizar previews WhatsApp
-  const precios=document.querySelectorAll('textarea[readonly]');
-  if(precios[0]) precios[0].value=buildMsgPrecios();
-  if(precios[1]) precios[1].value=buildMsgPesos();
+  const elPre=document.getElementById('wa-precios');
+  const elPes=document.getElementById('wa-pesos');
+  if(elPre) elPre.value=buildMsgPrecios();
+  if(elPes) elPes.value=buildMsgPesos();
+}
+
+function buscarIdxPeso(nombreParte){
+  // 1 — match exacto normalizado
+  let idx=pesoRows.findIndex(r=>normalizarTexto(r.producto)===nombreParte);
+  if(idx>=0) return idx;
+  // 2 — candidatos por inclusion, ordenados por nombre mas largo primero (mas especifico)
+  const candidatos=pesoRows
+    .map((r,i)=>({i,prod:normalizarTexto(r.producto)}))
+    .filter(({prod})=>nombreParte.includes(prod)||prod.includes(nombreParte))
+    .sort((a,b)=>b.prod.length-a.prod.length);
+  if(candidatos.length) return candidatos[0].i;
+  return -1;
 }
 
 function aplicarPreciosBloque(){
   const txt=document.getElementById('bloque-precios').value.trim();
-  if(!txt){toast('⚠️ Pegá los precios primero');return;}
+  if(!txt){toast('⚠️ Pega los precios primero');return;}
   let aplicados=0;
-  const noEncontrados=[];
+  const agregados=[];
   const interpretados=[];
   txt.split('\n').forEach(l=>{
     const t=l.trim();if(!t)return;
@@ -718,34 +806,35 @@ function aplicarPreciosBloque(){
       .replace(/\s+/g,' ')
       .trim();
     if(!nombreParte)return;
-    const idx=pesoRows.findIndex(r=>{
-      const prod=normalizarTexto(r.producto);
-      return prod.includes(nombreParte)||nombreParte.includes(prod);
-    });
+    const idx=buscarIdxPeso(nombreParte);
     if(idx>=0){
       const info=interpretarPrecioCantidad(pesoRows[idx].producto, qty, valor);
       pesoRows[idx].precioCompra=info.precioUnit;
       pesoRows[idx].precioVenta=calcVenta(pesoRows[idx].pesoTotal,pesoRows[idx].pesoCaja,info.precioUnit);
-      interpretados.push(`${pesoRows[idx].producto}: ${info.tipo_precio==='total' ? 'total '+expandirPrecio(valor).toLocaleString('es-PY')+' → unit '+info.precioUnit.toLocaleString('es-PY') : 'unit '+info.precioUnit.toLocaleString('es-PY')}`);
+      interpretados.push(pesoRows[idx].producto+': '+info.precioUnit.toLocaleString('es-PY'));
       aplicados++;
     } else {
-      noEncontrados.push(nombreParte);
+      // Producto no existe en la lista: se agrega automaticamente
+      const precioUnit=expandirPrecio(valor);
+      const nombreCapit=nombreParte.split(' ').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
+      pesoRows.push({producto:nombreCapit,pesoTotal:'',pesoCaja:'0',pesoNeto:'',precioCompra:precioUnit,precioVenta:''});
+      agregados.push(nombreCapit);
+      aplicados++;
     }
   });
   savePesos();
-  let msg=`✅ ${aplicados} precios aplicados`;
   setTimeout(()=>{
     const el=document.getElementById('bloque-resultado');
     if(el){
-      el.innerHTML=`<div style="margin-top:10px;padding:10px;background:var(--bg3);border:1px solid var(--border);border-radius:10px;font-family:var(--mono);font-size:.75rem">
-        <div style="color:var(--accent);margin-bottom:6px">✅ ${aplicados} aplicados correctamente</div>
-        ${interpretados.length?`<div style="color:var(--txt2);margin-bottom:6px">${interpretados.slice(0,6).join('<br>')}</div>`:''}
-        ${noEncontrados.length?`<div style="color:var(--warn)">⚠️ No encontrados (${noEncontrados.length}):<br><span style="color:var(--txt3)">${noEncontrados.join(', ')}</span></div>`:''}
-      </div>`;
+      el.innerHTML='<div style="margin-top:10px;padding:10px;background:var(--bg3);border:1px solid var(--border);border-radius:10px;font-family:var(--mono);font-size:.75rem">'+
+        '<div style="color:var(--accent);margin-bottom:6px">OK '+aplicados+' aplicados</div>'+
+        (interpretados.length?'<div style="color:var(--txt2);margin-bottom:6px">'+interpretados.slice(0,8).join('<br>')+'</div>':'')+
+        (agregados.length?'<div style="color:#4ade80;margin-top:6px">+ Nuevos agregados ('+agregados.length+'): '+agregados.join(', ')+'<br><span style="opacity:.7">Carga el peso para calcular precio de venta</span></div>':'')+
+        '</div>';
     }
   },100);
-  if(noEncontrados.length) msg+=`\n⚠️ No encontrados: ${noEncontrados.join(', ')}`;
-  toast(msg,3500);render();
+  toast('OK '+aplicados+' aplicados'+(agregados.length?' · +'+agregados.length+' nuevos':''),3500);
+  render();
 }
 
 function buildMsgPrecios(){
@@ -766,6 +855,11 @@ function buildMsgPesos(){
     .forEach(r=>lines.push(`${r.producto}: ${r.pesoTotal} kg`));
   lines.push('','Última modificación: '+new Date().toLocaleString('es-PY'));
   return lines.join('\n');
+}
+
+function abrirWA(num, tipo){
+  const texto = tipo==='precios' ? buildMsgPrecios() : buildMsgPesos();
+  window.open('https://wa.me/'+num+'?text='+encodeURIComponent(texto),'_blank');
 }
 
 function resetPesos(){
@@ -1762,11 +1856,26 @@ function pgMemoria(){
     </button>
   </div>
 
+  <!-- MEMORIA DE PESOS -->
+  ${(()=>{
+    const wkeys = Object.keys(weightMemory).sort();
+    if(!wkeys.length) return '<div class="card"><div class="ct">⚖️ MEMORIA DE PESOS</div><div class="empty"><div class="ico">⚖️</div>Todavia no aprendi ningun peso.<div style="margin-top:8px;opacity:.6">Carga pesos en la tabla y la app empezara a aprender.</div></div></div>';
+    const filasPesos = wkeys.map(key=>{
+      const mem = weightMemory[key];
+      const ultimos = mem.pesos.slice(-3).map(p=>p.pt+'kg').join(' → ');
+      const trend = mem.pesos.length>=2
+        ? mem.pesos[mem.pesos.length-1].pt > mem.pesos[mem.pesos.length-2].pt ? '📈'
+        : mem.pesos[mem.pesos.length-1].pt < mem.pesos[mem.pesos.length-2].pt ? '📉' : '➡️'
+        : '➡️';
+      return '<div class="li"><div class="lim"><div class="lin">'+key+' '+trend+'</div><div class="lis">Ultimo: '+mem.pesos[mem.pesos.length-1].pt+'kg · Rango: '+mem.min+'–'+mem.max+'kg · '+mem.total+' registro(s)</div><div style="font-family:var(--mono);font-size:.65rem;color:var(--txt3);margin-top:2px">'+ultimos+'</div></div><button class="btn bred bsm" onclick="olvidarPeso(''+key+'')">✕</button></div>';
+    }).join('');
+    return '<div class="card"><div class="ct">⚖️ MEMORIA DE PESOS ('+wkeys.length+' productos)</div><p style="font-family:var(--mono);font-size:.72rem;color:var(--txt3);margin-bottom:14px;line-height:1.7">La app aprende el peso tipico de cada producto. Te avisa si el peso cambia mas del 15% respecto al registro anterior.</p>'+filasPesos+'<button class="btn bred bfull" style="margin-top:10px" onclick="limpiarMemoriaPesos()">Borrar memoria de pesos</button></div>';
+  })()}
+
   <div class="card" style="border-color:var(--accent)">
     <div class="ct">💾 BACKUP DE DATOS</div>
     <p style="font-family:var(--mono);font-size:.72rem;color:var(--txt3);margin-bottom:14px;line-height:1.7">
-      Exportá tus datos antes de actualizar la app o para pasarlos a otro dispositivo.
-      Los datos incluyen compras, gastos, ventas y memoria de precios.
+      Exporta tus datos antes de actualizar la app o para pasarlos a otro dispositivo.
     </p>
     <button class="btn bblue bfull" style="margin-bottom:8px" onclick="exportarDatos()">
       📤 EXPORTAR TODOS LOS DATOS
@@ -1793,9 +1902,9 @@ function limpiarMemoria(){
 
 function exportarDatos(){
   const backup = JSON.stringify({
-    db, priceMemory,
+    db, priceMemory, weightMemory,
     exportado: new Date().toLocaleString('es-PY'),
-    version: 'verdapp-v5'
+    version: 'verdapp-v6'
   }, null, 2);
   // Intentar copiar al portapapeles
   if(navigator.clipboard){
@@ -1830,6 +1939,10 @@ function importarDatos(){
     if(parsed.priceMemory){
       priceMemory = parsed.priceMemory;
       localStorage.setItem(KEY_PRECIOS, JSON.stringify(priceMemory));
+    }
+    if(parsed.weightMemory){
+      weightMemory = parsed.weightMemory;
+      localStorage.setItem(KEY_WMEM, JSON.stringify(weightMemory));
     }
     toast('✅ Datos restaurados correctamente');
     render();
@@ -1908,25 +2021,19 @@ function balanceDia(fecha){
    TAB BALANCE
 ═══════════════════════════════════════════════════════ */
 function pgBalance(){
-  const s = semana();
-  // Semana lunes-sábado (sin domingo)
+  const s  = semana();
+  const bHoy = calcBalance(iso=>iso===hoy());
+  const bSem = calcBalance(enSem);
+  const bMes = calcBalance(iso=>enMes(iso,0));
+  const bMesAnt = calcBalance(iso=>enMes(iso,-1));
+
+  // Balance por día de la semana actual
   const diasSem = [];
-  for(let i=0;i<6;i++){
+  for(let i=0;i<7;i++){
     const d=new Date(s.ini+'T12:00');
     d.setDate(d.getDate()+i);
     diasSem.push(toISO(d));
   }
-
-  // Calcular balances
-  const bHoy = calcBalance(iso=>iso===hoy());
-  const bSem = calcBalance(iso=>diasSem.includes(iso));
-  const bMes = calcBalance(iso=>enMes(iso,0));
-  const bMesAnt = calcBalance(iso=>enMes(iso,-1));
-
-  // Rango personalizado
-  const iniPer = window.balIni || s.ini;
-  const finPer = window.balFin || s.fin;
-  const bPer = calcBalance(iso=>iso>=iniPer&&iso<=finPer);
 
   const filaDia = diasSem.map(f=>{
     const b=calcBalance(iso=>iso===f);
@@ -1952,38 +2059,13 @@ function pgBalance(){
   <!-- HOY -->
   ${balanceCard('HOY — '+lbl(hoy()), bHoy)}
 
-  <!-- SEMANA LUNES-SÁBADO -->
-  ${balanceCard('SEMANA LUN→SÁB · '+lbl(s.ini)+' → '+lbl(diasSem[5]), bSem,
+  <!-- SEMANA -->
+  ${balanceCard('SEMANA · '+lbl(s.ini)+' → '+lbl(s.fin), bSem,
     `<div style="margin-top:12px">
       <div style="font-family:var(--mono);font-size:.7rem;color:var(--txt3);margin-bottom:8px;letter-spacing:1px">DETALLE POR DÍA</div>
       ${filaDia}
     </div>`
   )}
-
-  <!-- PERÍODO PERSONALIZADO -->
-  <div class="card">
-    <div class="ct">📅 PERÍODO PERSONALIZADO</div>
-    <div class="g2" style="margin-bottom:10px">
-      <div><label>DESDE</label>
-        <input type="date" id="bal-ini" value="${iniPer}"
-          onchange="window.balIni=this.value;render()"/>
-      </div>
-      <div><label>HASTA</label>
-        <input type="date" id="bal-fin" value="${finPer}"
-          onchange="window.balFin=this.value;render()"/>
-      </div>
-    </div>
-    <div style="background:var(--bg3);border-radius:10px;padding:12px">
-      <div class="sr"><span class="sl">Ventas</span><span class="sv pos">${fm(bPer.tv)}</span></div>
-      <div class="sr"><span class="sl">Compras</span><span class="sv neg">- ${fm(bPer.deuda)}</span></div>
-      <div class="sr"><span class="sl">Gastos</span><span class="sv neg">- ${fm(bPer.tg)}</span></div>
-      <div class="sr" style="border-top:2px solid var(--border);padding-top:10px;margin-top:4px">
-        <span class="sl" style="font-weight:700">RESULTADO</span>
-        <span class="sv ${bPer.res>=0?'pos':'neg'}" style="font-size:1.3rem">${fm(bPer.res)}</span>
-      </div>
-      ${bPer.margenPct?`<div class="sr"><span class="sl">Margen</span><span class="sv ${bPer.res>=0?'pos':'neg'}">${bPer.margenPct}%</span></div>`:''}
-    </div>
-  </div>
 
   <!-- MES ACTUAL -->
   ${balanceCard('MES ACTUAL — '+getMes(0).nombre, bMes)}
@@ -1991,6 +2073,266 @@ function pgBalance(){
   <!-- MES ANTERIOR -->
   ${balanceCard('MES ANTERIOR — '+getMes(-1).nombre, bMesAnt)}
   `;
+}
+
+/* ═══════════════════════════════════════════════════════
+   TAB CIERRE SEMANAL
+═══════════════════════════════════════════════════════ */
+const KEY_CIERRES = 'verdapp_cierres_v1';
+let cierres = [];
+
+function loadCierres(){
+  try{ const r=localStorage.getItem(KEY_CIERRES); if(r) cierres=JSON.parse(r); } catch(e){}
+}
+function saveCierres(){
+  localStorage.setItem(KEY_CIERRES, JSON.stringify(cierres));
+}
+loadCierres();
+
+function pgCierre(){
+  const s = semana();
+  const b = calcBalance(enSem);
+
+  // Detalle por día de la semana
+  const diasSem = [];
+  for(let i=0;i<7;i++){
+    const d=new Date(s.ini+'T12:00');
+    d.setDate(d.getDate()+i);
+    diasSem.push(toISO(d));
+  }
+
+  // Desglose gastos por tipo
+  const gs = db.gastos.filter(g=>enSem(g.fecha));
+  const gastosTipo = {};
+  gs.forEach(g=>{ gastosTipo[g.tipo]=(gastosTipo[g.tipo]||0)+g.monto; });
+
+  // Ventas por método
+  const vs = db.ventas.filter(v=>enSem(v.fecha));
+  const vMet = vs.reduce((a,v)=>({ef:a.ef+v.efectivo,tf:a.tf+v.transferencia,ps:a.ps+v.pos}),{ef:0,tf:0,ps:0});
+
+  // Pendientes sin precio
+  const pendCount = db.compras.filter(c=>enSem(c.fecha)&&c.pendiente).length;
+
+  const yaHayCierre = cierres.find(c=>c.semIni===s.ini);
+
+  const filaDias = diasSem.map(f=>{
+    const bd = calcBalance(iso=>iso===f);
+    if(!bd.tv&&!bd.tc&&!bd.tg) return `<div class="sr" style="opacity:.3">
+      <span class="sl">${lbl(f)}</span>
+      <span style="font-family:var(--mono);font-size:.7rem;color:var(--txt3)">sin datos</span>
+    </div>`;
+    const col = bd.res>=0?'pos':'neg';
+    return`<div class="sr">
+      <div>
+        <div class="sl">${lbl(f)} ${bd.res>=0?'📈':'📉'}</div>
+        <div style="font-family:var(--mono);font-size:.67rem;color:var(--txt3)">
+          V:${fm(bd.tv)} · C:${fm(bd.deuda)} · G:${fm(bd.tg)}
+        </div>
+      </div>
+      <span class="sv ${col}">${fm(bd.res)}</span>
+    </div>`;
+  }).join('');
+
+  const historial = [...cierres].reverse().map(c=>{
+    const col = c.resultado>=0?'#4ade80':'var(--danger)';
+    return`<div class="card" style="border-color:var(--border);margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+        <div>
+          <div style="font-family:var(--mono);font-size:.72rem;color:var(--accent);font-weight:700">
+            📋 ${lbl(c.semIni)} → ${lbl(c.semFin)}
+          </div>
+          <div style="font-family:var(--mono);font-size:.63rem;color:var(--txt3);margin-top:2px">
+            Cerrado: ${c.fechaCierre}
+          </div>
+        </div>
+        <button class="btn bred bsm" onclick="eliminarCierre('${c.id}')">✕</button>
+      </div>
+      <div class="sgrid" style="margin-bottom:10px">
+        <div class="bstat"><div class="l">VENTAS</div><div class="v pos" style="font-size:1.2rem">${fm(c.ventas)}</div></div>
+        <div class="bstat"><div class="l">COMPRAS</div><div class="v neg" style="font-size:1.2rem">${fm(c.compras)}</div></div>
+        <div class="bstat"><div class="l">GASTOS</div><div class="v neg" style="font-size:1.2rem">${fm(c.gastos)}</div></div>
+        <div class="bstat"><div class="l">RESULTADO</div><div class="v" style="font-size:1.2rem;color:${col}">${fm(c.resultado)}</div></div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn bghost bsm bfull" onclick="exportarCierre('${c.id}')">📤 Exportar</button>
+        <button class="btn bgreen bsm bfull" onclick="compartirCierreWA('${c.id}')">📱 WhatsApp</button>
+      </div>
+    </div>`;
+  }).join('') || `<div class="empty"><div class="ico">📋</div>No hay cierres anteriores</div>`;
+
+  return`
+  <!-- RESUMEN SEMANA ACTUAL -->
+  <div class="card" style="border-color:${b.res>=0?'var(--accent)':'var(--danger)'}">
+    <div class="ct">${b.res>=0?'📈':'📉'} SEMANA ACTUAL · ${lbl(s.ini)} → ${lbl(s.fin)}</div>
+    <div class="sgrid" style="margin-bottom:12px">
+      <div class="bstat"><div class="l">VENTAS</div><div class="v pos">${fm(b.tv)}</div></div>
+      <div class="bstat"><div class="l">COMPRAS</div><div class="v neg">${fm(b.deuda)}</div></div>
+      <div class="bstat"><div class="l">GASTOS</div><div class="v neg">${fm(b.tg)}</div></div>
+      <div class="bstat"><div class="l">RESULTADO</div><div class="v ${b.res>=0?'pos':'neg'}">${fm(b.res)}</div></div>
+    </div>
+    <div style="background:var(--bg3);border-radius:10px;padding:12px;margin-bottom:12px">
+      <div class="sr"><span class="sl">Ventas totales</span><span class="sv pos">${fm(b.tv)}</span></div>
+      <div class="sr"><span class="sl">— Deuda proveedor</span><span class="sv neg">- ${fm(b.deuda)}</span></div>
+      <div class="sr"><span class="sl">— Gastos operativos</span><span class="sv neg">- ${fm(b.tg)}</span></div>
+      <div class="sr" style="border-top:2px solid var(--border);margin-top:4px;padding-top:10px">
+        <span class="sl" style="font-weight:700">GANANCIA NETA</span>
+        <span class="sv ${b.res>=0?'pos':'neg'}" style="font-size:1.3rem;font-weight:800">${fm(b.res)}</span>
+      </div>
+      <div class="sr"><span class="sl">Margen sobre ventas</span><span class="sv ${b.res>=0?'pos':'neg'}">${b.margenPct}%</span></div>
+    </div>
+
+    <!-- Detalle por día -->
+    <div style="font-family:var(--mono);font-size:.7rem;color:var(--txt3);margin-bottom:8px;letter-spacing:1px">DETALLE POR DÍA</div>
+    ${filaDias}
+  </div>
+
+  <!-- Gastos por tipo -->
+  <div class="card">
+    <div class="ct">💸 GASTOS POR TIPO · ESTA SEMANA</div>
+    ${Object.keys(gastosTipo).length
+      ? Object.entries(gastosTipo).map(([k,v])=>`<div class="sr">
+          <span class="sl">${k.toUpperCase()}</span>
+          <span class="sv neg">${fm(v)}</span>
+        </div>`).join('')
+      : `<div class="empty"><div class="ico">💸</div>Sin gastos esta semana</div>`}
+  </div>
+
+  <!-- Ventas por método -->
+  <div class="card">
+    <div class="ct">💰 VENTAS POR MÉTODO · ESTA SEMANA</div>
+    <div class="sr"><span class="sl">Efectivo</span><span class="sv pos">${fm(vMet.ef)}</span></div>
+    <div class="sr"><span class="sl">Transferencia</span><span class="sv pos">${fm(vMet.tf)}</span></div>
+    <div class="sr"><span class="sl">POS</span><span class="sv pos">${fm(vMet.ps)}</span></div>
+    <div class="sr" style="border-top:2px solid var(--border);margin-top:4px;padding-top:10px">
+      <span class="sl" style="font-weight:700">TOTAL COBRADO</span>
+      <span class="sv pos" style="font-size:1.1rem">${fm(vMet.ef+vMet.tf+vMet.ps)}</span>
+    </div>
+  </div>
+
+  <!-- Botón cerrar semana -->
+  ${pendCount>0?`<div style="background:#1e1030;border:1px solid var(--purple);border-radius:12px;padding:12px;margin-bottom:14px;font-family:var(--mono);font-size:.75rem;color:var(--purple)">
+    ⚠️ Hay <b>${pendCount}</b> producto(s) sin precio. Se recomienda completarlos antes de cerrar.
+  </div>`:''}
+
+  <button class="btn ${yaHayCierre?'bghost':'bg'} bfull" style="margin-bottom:14px" onclick="cerrarSemana()">
+    ${yaHayCierre?'🔄 REEMPLAZAR CIERRE DE ESTA SEMANA':'✅ CERRAR SEMANA Y GUARDAR RESUMEN'}
+  </button>
+
+  <!-- Historial de cierres -->
+  <div style="font-family:var(--mono);font-size:.72rem;color:var(--txt3);letter-spacing:1px;margin-bottom:10px">
+    📁 CIERRES ANTERIORES
+  </div>
+  ${historial}
+  `;
+}
+
+function cerrarSemana(){
+  const s = semana();
+  const b = calcBalance(enSem);
+  const gs = db.gastos.filter(g=>enSem(g.fecha));
+  const vs = db.ventas.filter(v=>enSem(v.fecha));
+  const gastosTipo = {};
+  gs.forEach(g=>{ gastosTipo[g.tipo]=(gastosTipo[g.tipo]||0)+g.monto; });
+  const vMet = vs.reduce((a,v)=>({ef:a.ef+v.efectivo,tf:a.tf+v.transferencia,ps:a.ps+v.pos}),{ef:0,tf:0,ps:0});
+
+  // Detalle por día
+  const diasSem=[];
+  for(let i=0;i<7;i++){
+    const d=new Date(s.ini+'T12:00');d.setDate(d.getDate()+i);diasSem.push(toISO(d));
+  }
+  const porDia = diasSem.map(f=>{
+    const bd=calcBalance(iso=>iso===f);
+    return {fecha:f, ventas:bd.tv, compras:bd.deuda, gastos:bd.tg, resultado:bd.res};
+  }).filter(d=>d.ventas||d.compras||d.gastos);
+
+  const cierre = {
+    id: uid(),
+    semIni: s.ini,
+    semFin: s.fin,
+    fechaCierre: new Date().toLocaleString('es-PY'),
+    ventas: b.tv,
+    compras: b.deuda,
+    gastos: b.tg,
+    resultado: b.res,
+    margen: b.margenPct,
+    gastosTipo,
+    ventasPorMetodo: vMet,
+    porDia
+  };
+
+  // Reemplazar si ya existe para esta semana
+  cierres = cierres.filter(c=>c.semIni!==s.ini);
+  cierres.push(cierre);
+  saveCierres();
+  toast('✅ Cierre semanal guardado');
+  render();
+}
+
+function eliminarCierre(id){
+  if(!confirm('¿Eliminar este cierre?'))return;
+  cierres=cierres.filter(c=>c.id!==id);
+  saveCierres();
+  toast('🗑️ Cierre eliminado');
+  render();
+}
+
+function textoCierre(id){
+  const c=cierres.find(x=>x.id===id); if(!c) return '';
+  const lineas=[
+    `📋 CIERRE SEMANAL`,
+    `📅 ${lbl(c.semIni)} → ${lbl(c.semFin)}`,
+    ``,
+    `💰 VENTAS:     ${fm(c.ventas)}`,
+    `📦 COMPRAS:    ${fm(c.compras)}`,
+    `💸 GASTOS:     ${fm(c.gastos)}`,
+    ``,
+    `✅ GANANCIA:   ${fm(c.resultado)}`,
+    `📊 MARGEN:     ${c.margen}%`,
+    ``,
+    `── GASTOS POR TIPO ──`,
+    ...Object.entries(c.gastosTipo||{}).map(([k,v])=>`  ${k}: ${fm(v)}`),
+    ``,
+    `── VENTAS POR MÉTODO ──`,
+    `  Efectivo:       ${fm(c.ventasPorMetodo?.ef||0)}`,
+    `  Transferencia:  ${fm(c.ventasPorMetodo?.tf||0)}`,
+    `  POS:            ${fm(c.ventasPorMetodo?.ps||0)}`,
+    ``,
+    `── DETALLE POR DÍA ──`,
+    ...(c.porDia||[]).map(d=>`  ${lbl(d.fecha)}: V:${fm(d.ventas)} C:${fm(d.compras)} G:${fm(d.gastos)} → ${fm(d.resultado)}`),
+    ``,
+    `Generado: ${c.fechaCierre}`,
+    `VerdApp`
+  ];
+  return lineas.join('\n');
+}
+
+function exportarCierre(id){
+  const c=cierres.find(x=>x.id===id); if(!c) return;
+  const texto = textoCierre(id);
+  // Intentar copiar
+  if(navigator.clipboard){
+    navigator.clipboard.writeText(texto)
+      .then(()=>toast('✅ Cierre copiado al portapapeles'))
+      .catch(()=>descargarCierre(id,texto));
+  } else {
+    descargarCierre(id,texto);
+  }
+}
+
+function descargarCierre(id, texto){
+  const c=cierres.find(x=>x.id===id); if(!c) return;
+  const blob=new Blob([texto],{type:'text/plain;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download=`cierre-${c.semIni}.txt`;a.click();
+  URL.revokeObjectURL(url);
+  toast('✅ Cierre descargado');
+}
+
+function compartirCierreWA(id){
+  const texto = textoCierre(id);
+  // Abrir WhatsApp con el primer número
+  window.open('https://wa.me/'+WA_NUMS[0]+'?text='+encodeURIComponent(texto),'_blank');
 }
 
 /* ═══════════════════════════════════════════════════════
