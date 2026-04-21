@@ -200,15 +200,18 @@
    PRODUCTOS DEFAULT (de tu products.json)
 ═══════════════════════════════════════════════════════ */
 const PRODUCTOS_DEFAULT = [
-  "Aguacate","Ajo","Banana","Batata Nacional","Berenjena","Cebolla","Cebolla Morada",
+  "Acelga","Aguacate","Ajo","Apio","Banana","Banana de Oro","Batata Brasil",
+  "Batata Nacional","Berenjena","Cebolla","Cebolla Morada","Cebollita",
   "Choclo","Ciruela","Curcuma","Durazno","Frutilla","Gengibre","Harina de Maiz",
-  "Kiwi","Lechuga Hidroponica","Lechuga Repollada","Limon","Locote Amarillo",
-  "Locote Rojo","Locote Verde","Mamon Brasil","Mamón Nac","Mandarina",
-  "Manzana Roja Grande","Manzana Verde","Mburukuja","Melon Brasil","Melon Japones",
-  "Melon Nacional","Naranja","Papa","Papa Brasil","Pelon","Pepino","Pera",
-  "Piña Grande","Pomelo","Poroto Rojo","Queso","Remolacha","Repollo",
-  "Repollo Morado","Sandia","Tomate","Tomate Liza","Tomate Picado","Uva",
-  "Verdeo","Zanahoria","Zapallito","Zapallo Brasil","Zuchini"
+  "Jengibre","Kiwi","Kuratu","Lechuga Hidroponica","Lechuga Repollada","Limon",
+  "Locote Amarillo","Locote Rojo","Locote Verde","Mamon Brasil Chico",
+  "Mamon Brasil Grande","Mamon Nacional","Mandarina","Mandarina Argentina",
+  "Mango Rosa","Manzana Roja Grande","Manzana Verde","Mburukuja","Melon Brasil",
+  "Melon Japones","Melon Nacional","Naranja","Papa","Papa Brasil","Pelon",
+  "Pepino","Pera","Perejil","Pitaya","Piña Grande","Pomelo","Poroto Rojo",
+  "Queso","Remolacha","Repollo","Repollo Morado","Sandia","Tomate","Tomate Liza",
+  "Tomate Picado","Uva","Uva Red","Verdeo","Zanahoria","Zapallito",
+  "Zapallo Brasil","Zuchini"
 ];
 
 // Números de WhatsApp
@@ -778,12 +781,36 @@ function buscarIdxPeso(nombreParte){
   // 1 — match exacto normalizado
   let idx=pesoRows.findIndex(r=>normalizarTexto(r.producto)===nombreParte);
   if(idx>=0) return idx;
-  // 2 — candidatos por inclusion, ordenados por nombre mas largo primero (mas especifico)
-  const candidatos=pesoRows
+
+  // 2 — el nombre buscado contiene al producto Y el producto es al menos 60% del nombre buscado
+  //     Esto evita que "banana" matchee "banana oro" (banana=6, banana oro=10 => 6/10=60% OK)
+  //     pero SI permite que "banana oro" matchee "banana" solo si no hay producto mas especifico
+  const candidatosExactos=pesoRows
     .map((r,i)=>({i,prod:normalizarTexto(r.producto)}))
-    .filter(({prod})=>nombreParte.includes(prod)||prod.includes(nombreParte))
-    .sort((a,b)=>b.prod.length-a.prod.length);
-  if(candidatos.length) return candidatos[0].i;
+    .filter(({prod})=>{
+      if(nombreParte===prod) return true;
+      // el buscado incluye al prod: "banana oro 190" incluye "banana oro"
+      if(nombreParte.includes(prod)){
+        const similitud=prod.length/nombreParte.length;
+        return similitud>=0.6; // al menos 60% de similitud
+      }
+      // el prod incluye al buscado: "banana de oro" incluye "banana oro"
+      if(prod.includes(nombreParte)) return true;
+      return false;
+    })
+    .sort((a,b)=>b.prod.length-a.prod.length); // mas largo = mas especifico primero
+
+  if(candidatosExactos.length) return candidatosExactos[0].i;
+
+  // 3 — fallback: match por todas las palabras del buscado presentes en el producto
+  const palabrasBuscado=nombreParte.split(' ').filter(w=>w.length>2);
+  if(palabrasBuscado.length>=2){
+    const porPalabras=pesoRows
+      .map((r,i)=>({i,prod:normalizarTexto(r.producto)}))
+      .filter(({prod})=>palabrasBuscado.every(w=>prod.includes(w)))
+      .sort((a,b)=>b.prod.length-a.prod.length);
+    if(porPalabras.length) return porPalabras[0].i;
+  }
   return -1;
 }
 
