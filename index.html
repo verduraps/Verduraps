@@ -1884,20 +1884,7 @@ function pgMemoria(){
   </div>
 
   <!-- MEMORIA DE PESOS -->
-  ${(()=>{
-    const wkeys = Object.keys(weightMemory).sort();
-    if(!wkeys.length) return '<div class="card"><div class="ct">⚖️ MEMORIA DE PESOS</div><div class="empty"><div class="ico">⚖️</div>Todavia no aprendi ningun peso.<div style="margin-top:8px;opacity:.6">Carga pesos en la tabla y la app empezara a aprender.</div></div></div>';
-    const filasPesos = wkeys.map(key=>{
-      const mem = weightMemory[key];
-      const ultimos = mem.pesos.slice(-3).map(p=>p.pt+'kg').join(' → ');
-      const trend = mem.pesos.length>=2
-        ? mem.pesos[mem.pesos.length-1].pt > mem.pesos[mem.pesos.length-2].pt ? '📈'
-        : mem.pesos[mem.pesos.length-1].pt < mem.pesos[mem.pesos.length-2].pt ? '📉' : '➡️'
-        : '➡️';
-      return '<div class="li"><div class="lim"><div class="lin">'+key+' '+trend+'</div><div class="lis">Ultimo: '+mem.pesos[mem.pesos.length-1].pt+'kg · Rango: '+mem.min+'–'+mem.max+'kg · '+mem.total+' registro(s)</div><div style="font-family:var(--mono);font-size:.65rem;color:var(--txt3);margin-top:2px">'+ultimos+'</div></div><button class="btn bred bsm" onclick="olvidarPeso(''+key+'')">✕</button></div>';
-    }).join('');
-    return '<div class="card"><div class="ct">⚖️ MEMORIA DE PESOS ('+wkeys.length+' productos)</div><p style="font-family:var(--mono);font-size:.72rem;color:var(--txt3);margin-bottom:14px;line-height:1.7">La app aprende el peso tipico de cada producto. Te avisa si el peso cambia mas del 15% respecto al registro anterior.</p>'+filasPesos+'<button class="btn bred bfull" style="margin-top:10px" onclick="limpiarMemoriaPesos()">Borrar memoria de pesos</button></div>';
-  })()}
+  ${renderMemoriaPesos()}
 
   <div class="card" style="border-color:var(--accent)">
     <div class="ct">💾 BACKUP DE DATOS</div>
@@ -1911,6 +1898,45 @@ function pgMemoria(){
       📥 IMPORTAR DATOS (restaurar backup)
     </button>
   </div>`;
+}
+
+function renderMemoriaPesos(){
+  const wkeys = Object.keys(weightMemory).sort();
+  if(!wkeys.length) return `
+    <div class="card">
+      <div class="ct">⚖️ MEMORIA DE PESOS</div>
+      <div class="empty"><div class="ico">⚖️</div>Todavia no aprendi ningun peso.
+        <div style="margin-top:8px;opacity:.6">Carga pesos en la tabla y la app empezara a aprender.</div>
+      </div>
+    </div>`;
+  const filasPesos = wkeys.map(key=>{
+    const mem = weightMemory[key];
+    const ultimo = mem.pesos[mem.pesos.length-1];
+    const ultimos = mem.pesos.slice(-3).map(p=>p.pt+'kg').join(' → ');
+    const trend = mem.pesos.length>=2
+      ? ultimo.pt > mem.pesos[mem.pesos.length-2].pt ? '📈'
+      : ultimo.pt < mem.pesos[mem.pesos.length-2].pt ? '📉' : '➡️'
+      : '➡️';
+    return `<div class="li">
+      <div class="lim">
+        <div class="lin">${key} ${trend}</div>
+        <div class="lis">Ultimo: ${ultimo.pt}kg · Rango: ${mem.min}–${mem.max}kg · ${mem.total} registro(s)</div>
+        <div style="font-family:var(--mono);font-size:.65rem;color:var(--txt3);margin-top:2px">${ultimos}</div>
+      </div>
+      <button class="btn bred bsm" onclick="olvidarPeso('${key}')">✕</button>
+    </div>`;
+  }).join('');
+  return `
+    <div class="card">
+      <div class="ct">⚖️ MEMORIA DE PESOS (${wkeys.length} productos)</div>
+      <p style="font-family:var(--mono);font-size:.72rem;color:var(--txt3);margin-bottom:14px;line-height:1.7">
+        La app aprende el peso tipico de cada producto. Te avisa si el peso cambia mas del 15%.
+      </p>
+      ${filasPesos}
+      <button class="btn bred bfull" style="margin-top:10px" onclick="limpiarMemoriaPesos()">
+        🗑️ Borrar memoria de pesos
+      </button>
+    </div>`;
 }
 
 function olvidarProducto(key){
