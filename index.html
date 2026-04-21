@@ -167,8 +167,8 @@
     <button class="tab"     onclick="go('resumen')">📊 RESUMEN</button>
     <button class="tab"     onclick="go('pendientes')">⏳ PEND.</button>
     <button class="tab"     onclick="go('balance')">📈 BALANCE</button>
-    <button class="tab"     onclick="go('cierre')">📋 CIERRE</button>
     <button class="tab"     onclick="go('memoria')">🧠 MEMORIA</button>
+    <button class="tab"     onclick="go('cierre')">📋 CIERRE</button>
   </nav>
   <div id="pg"></div>
 </div>
@@ -200,18 +200,17 @@
    PRODUCTOS DEFAULT (de tu products.json)
 ═══════════════════════════════════════════════════════ */
 const PRODUCTOS_DEFAULT = [
-  "Acelga","Aguacate","Ajo","Apio","Banana","Banana de Oro","Batata Brasil",
-  "Batata Nacional","Berenjena","Cebolla","Cebolla Morada","Cebollita",
-  "Choclo","Ciruela","Curcuma","Durazno","Frutilla","Gengibre","Harina de Maiz",
-  "Jengibre","Kiwi","Kuratu","Lechuga Hidroponica","Lechuga Repollada","Limon",
-  "Locote Amarillo","Locote Rojo","Locote Verde","Mamon Brasil Chico",
-  "Mamon Brasil Grande","Mamon Nacional","Mandarina","Mandarina Argentina",
-  "Mango Rosa","Manzana Roja Grande","Manzana Verde","Mburukuja","Melon Brasil",
-  "Melon Japones","Melon Nacional","Naranja","Papa","Papa Brasil","Pelon",
-  "Pepino","Pera","Perejil","Pitaya","Piña Grande","Pomelo","Poroto Rojo",
-  "Queso","Remolacha","Repollo","Repollo Morado","Sandia","Tomate","Tomate Liza",
-  "Tomate Picado","Uva","Uva Red","Verdeo","Zanahoria","Zapallito",
-  "Zapallo Brasil","Zuchini"
+  "Acelga","Aguacate","Ajo","Apio","Banana","Banana de Oro","Batata Brasil","Batata Nacional",
+  "Berenjena","Cebolla","Cebolla Morada","Cebollita","Choclo","Ciruela","Curcuma",
+  "Durazno","Frutilla","Gengibre","Harina de Maiz","Jengibre","Kiwi","Kuratu",
+  "Lechuga Hidroponica","Lechuga Repollada","Limon","Locote Amarillo","Locote Rojo","Locote Verde",
+  "Mamon Brasil Chico","Mamon Brasil Grande","Mamon Nacional","Mamón Nac","Mandarina",
+  "Mandarina Argentina","Mango Rosa","Manzana Roja Grande","Manzana Verde","Mburukuja",
+  "Melon Brasil","Melon Japones","Melon Nacional","Naranja","Papa","Papa Brasil",
+  "Pelon","Pepino","Pera","Perejil","Piña Grande","Pitaya","Pomelo",
+  "Poroto Rojo","Queso","Remolacha","Repollo","Repollo Morado","Sandia","Tomate",
+  "Tomate Liza","Tomate Picado","Uva","Uva Red","Verdeo","Zanahoria",
+  "Zapallito","Zapallo Brasil","Zuchini"
 ];
 
 // Números de WhatsApp
@@ -223,14 +222,17 @@ const WA_NOMBRES = ['0991378503','0991656990','0983493424'];
 ═══════════════════════════════════════════════════════ */
 const KEY_GESTION = 'verdapp_v4';
 const KEY_PESOS   = 'verdapp_pesos_v2';
-const KEY_PRECIOS = 'verdapp_precios_v1'; // memoria de precios
-const KEY_WMEM    = 'verdapp_wmem_v1';    // memoria de pesos
+const KEY_PRECIOS = 'verdapp_precios_v1'; // memoria de precios aprendidos
+const KEY_CIERRES = 'verdapp_cierres_v1';
+const KEY_PESO_MEM = 'verdapp_peso_mem_v1'; // memoria de pesos totales por producto
 
 let db = {compras:[],gastos:[],ventas:[]};
-let pesoRows = [];
+let pesoRows = []; // [{producto, pesoTotal, pesoCaja, pesoNeto, precioCompra, precioVenta}]
 let margen = 1.3;
+// Memoria de precios: {nombreNorm: {precios:[...ultimos 10], min, max, avg, total_registros}}
 let priceMemory = {};
-let weightMemory = {}; // {nombreNorm: {pesos:[{v,fecha}], min, max, avg, total}}
+let cierres = []; // [{id, fecha, semana:{ini,fin}, tc, tdesc, deuda, tg, tv, res, nota}]
+let pesoMemory = {}; // {nombreNorm: {pesos:[...ultimos 10], avg, total}}
 
 function loadAll() {
   try { const r=localStorage.getItem(KEY_GESTION); if(r) db=JSON.parse(r); } catch(e){}
@@ -243,8 +245,44 @@ function loadAll() {
     }
   } catch(e){}
   try { const r=localStorage.getItem(KEY_PRECIOS); if(r) priceMemory=JSON.parse(r); } catch(e){}
-  try { const r=localStorage.getItem(KEY_WMEM);    if(r) weightMemory=JSON.parse(r); } catch(e){}
+  try { const r=localStorage.getItem(KEY_CIERRES); if(r) cierres=JSON.parse(r); } catch(e){}
+  try { const r=localStorage.getItem(KEY_PESO_MEM); if(r) pesoMemory=JSON.parse(r); } catch(e){}
   if(!pesoRows.length) initPesoRows();
+}
+
+/* ══════════════════════════════════════════════════════
+   MEMORIA DE PESOS TOTALES
+══════════════════════════════════════════════════════ */
+function aprenderPesoTotal(nombre, pesoTotal) {
+  const pt = Number(pesoTotal);
+  if(!nombre || !pt || pt <= 0) return;
+  const key = normalizarTexto(nombre).slice(0, 25);
+  if(!pesoMemory[key]) pesoMemory[key] = {pesos:[], total:0};
+  const mem = pesoMemory[key];
+  mem.pesos.push({peso: pt, fecha: hoy()});
+  if(mem.pesos.length > 10) mem.pesos.shift();
+  const vals = mem.pesos.map(p=>p.peso);
+  mem.avg = parseFloat((vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(3));
+  mem.total = (mem.total||0) + 1;
+  localStorage.setItem(KEY_PESO_MEM, JSON.stringify(pesoMemory));
+}
+
+function detectarVariacionPeso(nombre, pesoNuevo) {
+  const pt = Number(pesoNuevo);
+  if(!pt || pt <= 0) return null;
+  const key = normalizarTexto(nombre).slice(0, 25);
+  const mem = pesoMemory[key];
+  if(!mem || mem.pesos.length < 1) return null;
+  const pesoAnterior = mem.avg;
+  if(!pesoAnterior) return null;
+  const variacion = ((pt - pesoAnterior) / pesoAnterior) * 100;
+  if(Math.abs(variacion) < 15) return null;
+  return {
+    anterior: pesoAnterior,
+    nuevo: pt,
+    pct: Math.round(variacion),
+    sube: variacion > 0
+  };
 }
 
 /* ── Guardar precio y TIPO aprendido ── */
@@ -270,49 +308,6 @@ function aprenderPrecio(nombre, precioUnit, tipo) {
     mem.tipoDefault = Object.entries(mem.tipos).sort((a,b)=>b[1]-a[1])[0][0];
   }
   localStorage.setItem(KEY_PRECIOS, JSON.stringify(priceMemory));
-}
-
-/* ── Memoria de PESOS ── */
-function aprenderPeso(nombre, pesoTotal, pesoNeto) {
-  const pt = parseFloat(pesoTotal); const pn = parseFloat(pesoNeto);
-  if(!nombre || !pt || pt <= 0) return;
-  const key = normalizarTexto(nombre).slice(0,20);
-  if(!weightMemory[key]) weightMemory[key] = {pesos:[], total:0};
-  const mem = weightMemory[key];
-  mem.pesos.push({pt, pn: pn||0, fecha: hoy()});
-  if(mem.pesos.length > 10) mem.pesos.shift();
-  const vals = mem.pesos.map(p=>p.pt);
-  mem.min = Math.min(...vals);
-  mem.max = Math.max(...vals);
-  mem.avg = parseFloat((vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(3));
-  mem.total = (mem.total||0) + 1;
-  localStorage.setItem(KEY_WMEM, JSON.stringify(weightMemory));
-}
-
-function detectarVariacionPeso(nombre, pesoNuevo) {
-  if(!pesoNuevo || pesoNuevo <= 0) return null;
-  const key = normalizarTexto(nombre).slice(0,20);
-  const mem = weightMemory[key];
-  if(!mem || mem.pesos.length < 2) return null;
-  const anterior = mem.pesos[mem.pesos.length-1].pt;
-  if(!anterior) return null;
-  const variacion = ((pesoNuevo - anterior) / anterior) * 100;
-  if(Math.abs(variacion) < 15) return null; // umbral 15% para pesos
-  return {anterior, nuevo: pesoNuevo, pct: Math.round(variacion), sube: variacion > 0};
-}
-
-function olvidarPeso(key) {
-  if(!confirm('Olvidar los pesos aprendidos de "'+key+'"?')) return;
-  delete weightMemory[key];
-  localStorage.setItem(KEY_WMEM, JSON.stringify(weightMemory));
-  toast('Eliminado');render();
-}
-
-function limpiarMemoriaPesos() {
-  if(!confirm('Borrar TODA la memoria de pesos aprendidos?')) return;
-  weightMemory = {};
-  localStorage.setItem(KEY_WMEM, JSON.stringify(weightMemory));
-  toast('Memoria de pesos borrada');render();
 }
 
 /* ── Obtener tipo aprendido para un producto ── */
@@ -412,6 +407,8 @@ function savePesos(){
   localStorage.setItem(KEY_PESOS, JSON.stringify({rows:pesoRows, margen, lastMod: new Date().toLocaleString('es-PY')}));
 }
 
+function saveCierres() { localStorage.setItem(KEY_CIERRES, JSON.stringify(cierres)); }
+
 function uid() { return Date.now().toString(36)+Math.random().toString(36).slice(2,5); }
 
 /* ═══════════════════════════════════════════════════════
@@ -502,7 +499,12 @@ const PRICE_HINTS = [
   {keys:['acelga'], min:25000, max:45000},
   {keys:['kuratu','perejil'], min:7000, max:25000},
   {keys:['cebollita','verdeo'], min:15000, max:35000},
-  {keys:['apio','espinaca'], min:15000, max:50000}
+  {keys:['apio','espinaca'], min:15000, max:50000},
+  {keys:['jengibre'], min:150000, max:280000},
+  {keys:['batata brasil','batata'], min:60000, max:100000},
+  {keys:['mango rosa','mango'], min:80000, max:160000},
+  {keys:['pitaya'], min:200000, max:400000},
+  {keys:['uva red'], min:200000, max:320000}
 ];
 function getPriceHint(nombre=''){
   // Primero: precios aprendidos (tienen prioridad — son datos reales de tu negocio)
@@ -600,9 +602,11 @@ function diaF(p){
 }
 
 function updateHdr(){
+
   const d=new Date();
   document.getElementById('hdr-d').innerHTML=`${lbl(hoy())}<br><span style="color:var(--txt3)">${DIAS[d.getDay()]}</span>`;
 }
+function updateHeader(){ updateHdr(); }
 
 /* ═══════════════════════════════════════════════════════
    TABS
@@ -610,7 +614,7 @@ function updateHdr(){
 let tab='pesos';
 function go(t){
   tab=t;
-  const ns=['pesos','ia','compras','gastos','ventas','resumen','pendientes','balance','cierre','memoria'];
+  const ns=['pesos','ia','compras','gastos','ventas','resumen','pendientes','balance','memoria','cierre'];
   document.querySelectorAll('.tab').forEach((b,i)=>b.classList.toggle('on',ns[i]===t));
   render();
 }
@@ -625,8 +629,8 @@ function render(){
   else if(tab==='resumen')p.innerHTML=pgResumen();
   else if(tab==='pendientes')p.innerHTML=pgPendientes();
   else if(tab==='balance')p.innerHTML=pgBalance();
-  else if(tab==='cierre') p.innerHTML=pgCierre();
   else if(tab==='memoria')p.innerHTML=pgMemoria();
+  else if(tab==='cierre') p.innerHTML=pgCierre();
   bindForms();
 }
 
@@ -644,6 +648,24 @@ function toast(msg,dur=2500){
 function toggleTheme(){
   document.body.classList.toggle('light');
   document.querySelector('.iBtn[onclick="toggleTheme()"]').textContent=document.body.classList.contains('light')?'🌙':'☀️';
+}
+
+/* ═══════════════════════════════════════════════════════
+   HELPER: buscarIdxPeso — prioriza coincidencias más específicas
+═══════════════════════════════════════════════════════ */
+function buscarIdxPeso(nombreBuscado) {
+  const norm = normalizarTexto(nombreBuscado);
+  // 1. Coincidencia exacta
+  let idx = pesoRows.findIndex(r => normalizarTexto(r.producto) === norm);
+  if(idx >= 0) return idx;
+  // 2. Candidatos: el nombre buscado contiene el producto O viceversa
+  //    Ordenar por longitud descendente → más específico primero
+  const candidatos = pesoRows
+    .map((r, i) => ({ i, len: normalizarTexto(r.producto).length, prod: normalizarTexto(r.producto) }))
+    .filter(x => norm.includes(x.prod) || x.prod.includes(norm))
+    .sort((a, b) => b.len - a.len);
+  if(candidatos.length > 0) return candidatos[0].i;
+  return -1;
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -717,52 +739,48 @@ function pgPesos(){
     <div class="ct">📲 ENVIAR POR WHATSAPP</div>
     <div style="margin-bottom:12px">
       <label>LISTA DE PRECIOS</label>
-      <textarea id="wa-precios" readonly style="min-height:100px;font-size:.75rem">${msgPrecios}</textarea>
+      <textarea readonly style="min-height:100px;font-size:.75rem">${msgPrecios}</textarea>
     </div>
     <div style="margin-bottom:14px">
-      ${WA_NUMS.map((n,i)=>`<button class="wa-btn" onclick="abrirWA('${n}','precios')">📱 Precios al ${WA_NOMBRES[i]}</button>`).join('')}
+      ${WA_NUMS.map((n,i)=>`<button class="wa-btn" onclick="waOpen('${n}','precios')">📱 Precios al ${WA_NOMBRES[i]}</button>`).join('')}
     </div>
     <div style="margin-bottom:12px">
       <label>LISTA DE PESOS</label>
-      <textarea id="wa-pesos" readonly style="min-height:100px;font-size:.75rem">${msgPesos}</textarea>
+      <textarea readonly style="min-height:100px;font-size:.75rem">${msgPesos}</textarea>
     </div>
     <div>
-      ${WA_NUMS.map((n,i)=>`<button class="wa-btn" style="background:#128c7e" onclick="abrirWA('${n}','pesos')">📱 Pesos al ${WA_NOMBRES[i]}</button>`).join('')}
+      ${WA_NUMS.map((n,i)=>`<button class="wa-btn" onclick="waOpen('${n}','pesos')" style="background:#128c7e">📱 Pesos al ${WA_NOMBRES[i]}</button>`).join('')}
     </div>
   </div>`;
 }
 
-function actualizarFila(i){
-  const r = pesoRows[i];
-  const ptAntes = parseFloat(r.pesoTotal);
-  r.pesoNeto = calcPesoNeto(r.pesoTotal, r.pesoCaja);
-  r.precioVenta = calcVenta(r.pesoTotal, r.pesoCaja, r.precioCompra);
-  savePesos();
-  // Detectar variacion de peso >= 15% y mostrar alerta inline
-  if(r.pesoTotal && parseFloat(r.pesoTotal) > 0) {
-    const varPeso = detectarVariacionPeso(r.producto, parseFloat(r.pesoTotal));
-    if(varPeso) {
-      const rows2 = document.querySelectorAll('.peso-table tbody tr');
-      if(rows2[i]) {
-        const existente = rows2[i].querySelector('.alerta-peso');
-        if(!existente) {
-          const td = document.createElement('td');
-          td.className = 'alerta-peso';
-          td.colSpan = 6;
-          td.style.cssText = 'padding:4px 8px;background:'+(varPeso.sube?'rgba(248,113,113,.12)':'rgba(74,222,128,.08)')+';border-radius:6px';
-          td.innerHTML = '<span style="font-family:var(--mono);font-size:.65rem;color:'+(varPeso.sube?'var(--danger)':'#4ade80')+';font-weight:700">'+(varPeso.sube?'▲ SUBE':'▼ BAJA')+' '+Math.abs(varPeso.pct)+'% peso &mdash; antes: '+varPeso.anterior+'kg &rarr; ahora: '+varPeso.nuevo+'kg</span>';
-          const newRow = rows2[i].parentNode.insertRow(rows2[i].rowIndex);
-          newRow.className = 'fila-alerta-peso';
-          newRow.appendChild(td);
-          // Aprender el nuevo peso despues de mostrar la alerta
-          aprenderPeso(r.producto, r.pesoTotal, r.pesoNeto);
-        }
-      }
-    } else {
-      // Sin variacion anomala: aprender silenciosamente
-      aprenderPeso(r.producto, r.pesoTotal, r.pesoNeto);
-    }
+/* ── WhatsApp opener dinámico ── */
+function waOpen(numero, tipo, textoCustom) {
+  let msg = '';
+  if(textoCustom) {
+    msg = textoCustom;
+  } else if(tipo === 'precios') {
+    msg = buildMsgPrecios();
+  } else if(tipo === 'pesos') {
+    msg = buildMsgPesos();
+  } else {
+    msg = tipo;
   }
+  window.open('https://wa.me/' + numero + '?text=' + encodeURIComponent(msg), '_blank');
+}
+
+function actualizarFila(i){
+  pesoRows[i].pesoNeto=calcPesoNeto(pesoRows[i].pesoTotal,pesoRows[i].pesoCaja);
+  pesoRows[i].precioVenta=calcVenta(pesoRows[i].pesoTotal,pesoRows[i].pesoCaja,pesoRows[i].precioCompra);
+  // Memoria de pesos: aprender y alertar si varía ≥15%
+  if(pesoRows[i].pesoTotal && Number(pesoRows[i].pesoTotal) > 0) {
+    const varPeso = detectarVariacionPeso(pesoRows[i].producto, pesoRows[i].pesoTotal);
+    if(varPeso) {
+      toast('⚠️ '+pesoRows[i].producto+': peso varía '+(varPeso.pct>0?'+':'')+varPeso.pct+'% (habitual: '+varPeso.anterior+'kg)', 4000);
+    }
+    aprenderPesoTotal(pesoRows[i].producto, pesoRows[i].pesoTotal);
+  }
+  savePesos();
   // Actualizar solo las celdas calculadas sin re-renderizar toda la tabla
   const rows=document.querySelectorAll('.peso-table tbody tr');
   if(rows[i]){
@@ -771,54 +789,16 @@ function actualizarFila(i){
     if(cells[1]) cells[1].textContent=pesoRows[i].precioVenta?pesoRows[i].precioVenta+' Gs/kg':'—';
   }
   // Actualizar previews WhatsApp
-  const elPre=document.getElementById('wa-precios');
-  const elPes=document.getElementById('wa-pesos');
-  if(elPre) elPre.value=buildMsgPrecios();
-  if(elPes) elPes.value=buildMsgPesos();
-}
-
-function buscarIdxPeso(nombreParte){
-  // 1 — match exacto normalizado
-  let idx=pesoRows.findIndex(r=>normalizarTexto(r.producto)===nombreParte);
-  if(idx>=0) return idx;
-
-  // 2 — el nombre buscado contiene al producto Y el producto es al menos 60% del nombre buscado
-  //     Esto evita que "banana" matchee "banana oro" (banana=6, banana oro=10 => 6/10=60% OK)
-  //     pero SI permite que "banana oro" matchee "banana" solo si no hay producto mas especifico
-  const candidatosExactos=pesoRows
-    .map((r,i)=>({i,prod:normalizarTexto(r.producto)}))
-    .filter(({prod})=>{
-      if(nombreParte===prod) return true;
-      // el buscado incluye al prod: "banana oro 190" incluye "banana oro"
-      if(nombreParte.includes(prod)){
-        const similitud=prod.length/nombreParte.length;
-        return similitud>=0.6; // al menos 60% de similitud
-      }
-      // el prod incluye al buscado: "banana de oro" incluye "banana oro"
-      if(prod.includes(nombreParte)) return true;
-      return false;
-    })
-    .sort((a,b)=>b.prod.length-a.prod.length); // mas largo = mas especifico primero
-
-  if(candidatosExactos.length) return candidatosExactos[0].i;
-
-  // 3 — fallback: match por todas las palabras del buscado presentes en el producto
-  const palabrasBuscado=nombreParte.split(' ').filter(w=>w.length>2);
-  if(palabrasBuscado.length>=2){
-    const porPalabras=pesoRows
-      .map((r,i)=>({i,prod:normalizarTexto(r.producto)}))
-      .filter(({prod})=>palabrasBuscado.every(w=>prod.includes(w)))
-      .sort((a,b)=>b.prod.length-a.prod.length);
-    if(porPalabras.length) return porPalabras[0].i;
-  }
-  return -1;
+  const precios=document.querySelectorAll('textarea[readonly]');
+  if(precios[0]) precios[0].value=buildMsgPrecios();
+  if(precios[1]) precios[1].value=buildMsgPesos();
 }
 
 function aplicarPreciosBloque(){
   const txt=document.getElementById('bloque-precios').value.trim();
-  if(!txt){toast('⚠️ Pega los precios primero');return;}
+  if(!txt){toast('⚠️ Pegá los precios primero');return;}
   let aplicados=0;
-  const agregados=[];
+  const noEncontrados=[];
   const interpretados=[];
   txt.split('\n').forEach(l=>{
     const t=l.trim();if(!t)return;
@@ -833,35 +813,43 @@ function aplicarPreciosBloque(){
       .replace(/\s+/g,' ')
       .trim();
     if(!nombreParte)return;
-    const idx=buscarIdxPeso(nombreParte);
+    // Usar buscarIdxPeso: prioriza coincidencia más específica
+    const idx = buscarIdxPeso(nombreParte);
     if(idx>=0){
       const info=interpretarPrecioCantidad(pesoRows[idx].producto, qty, valor);
       pesoRows[idx].precioCompra=info.precioUnit;
       pesoRows[idx].precioVenta=calcVenta(pesoRows[idx].pesoTotal,pesoRows[idx].pesoCaja,info.precioUnit);
-      interpretados.push(pesoRows[idx].producto+': '+info.precioUnit.toLocaleString('es-PY'));
+      interpretados.push(`${pesoRows[idx].producto}: ${info.tipo_precio==='total' ? 'total '+expandirPrecio(valor).toLocaleString('es-PY')+' → unit '+info.precioUnit.toLocaleString('es-PY') : 'unit '+info.precioUnit.toLocaleString('es-PY')}`);
       aplicados++;
     } else {
-      // Producto no existe en la lista: se agrega automaticamente
-      const precioUnit=expandirPrecio(valor);
-      const nombreCapit=nombreParte.split(' ').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
-      pesoRows.push({producto:nombreCapit,pesoTotal:'',pesoCaja:'0',pesoNeto:'',precioCompra:precioUnit,precioVenta:''});
-      agregados.push(nombreCapit);
+      // Producto no existe → agregarlo automáticamente con el precio
+      const nombreCapitalizado = nombreParte.split(' ').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
+      const info = interpretarPrecioCantidad(nombreCapitalizado, qty, valor);
+      pesoRows.push({
+        producto: nombreCapitalizado,
+        pesoTotal: '',
+        pesoCaja: '0',
+        pesoNeto: '',
+        precioCompra: info.precioUnit,
+        precioVenta: ''
+      });
+      interpretados.push('➕ NUEVO: '+nombreCapitalizado+': '+info.precioUnit.toLocaleString('es-PY'));
       aplicados++;
     }
   });
   savePesos();
+  let msg=`✅ ${aplicados} precios aplicados`;
   setTimeout(()=>{
     const el=document.getElementById('bloque-resultado');
     if(el){
-      el.innerHTML='<div style="margin-top:10px;padding:10px;background:var(--bg3);border:1px solid var(--border);border-radius:10px;font-family:var(--mono);font-size:.75rem">'+
-        '<div style="color:var(--accent);margin-bottom:6px">OK '+aplicados+' aplicados</div>'+
-        (interpretados.length?'<div style="color:var(--txt2);margin-bottom:6px">'+interpretados.slice(0,8).join('<br>')+'</div>':'')+
-        (agregados.length?'<div style="color:#4ade80;margin-top:6px">+ Nuevos agregados ('+agregados.length+'): '+agregados.join(', ')+'<br><span style="opacity:.7">Carga el peso para calcular precio de venta</span></div>':'')+
-        '</div>';
+      el.innerHTML=`<div style="margin-top:10px;padding:10px;background:var(--bg3);border:1px solid var(--border);border-radius:10px;font-family:var(--mono);font-size:.75rem">
+        <div style="color:var(--accent);margin-bottom:6px">✅ ${aplicados} aplicados correctamente</div>
+        ${interpretados.length?`<div style="color:var(--txt2);margin-bottom:6px">${interpretados.slice(0,8).join('<br>')}</div>`:''}
+      </div>`;
     }
   },100);
-  toast('OK '+aplicados+' aplicados'+(agregados.length?' · +'+agregados.length+' nuevos':''),3500);
-  render();
+  if(noEncontrados.length) msg+=`\n⚠️ No encontrados: ${noEncontrados.join(', ')}`;
+  toast(msg,3500);render();
 }
 
 function buildMsgPrecios(){
@@ -882,11 +870,6 @@ function buildMsgPesos(){
     .forEach(r=>lines.push(`${r.producto}: ${r.pesoTotal} kg`));
   lines.push('','Última modificación: '+new Date().toLocaleString('es-PY'));
   return lines.join('\n');
-}
-
-function abrirWA(num, tipo){
-  const texto = tipo==='precios' ? buildMsgPrecios() : buildMsgPesos();
-  window.open('https://wa.me/'+num+'?text='+encodeURIComponent(texto),'_blank');
 }
 
 function resetPesos(){
@@ -1870,6 +1853,23 @@ function pgMemoria(){
     </div>`;
   }).join('');
 
+  // Sección de pesos aprendidos
+  const keysPeso = Object.keys(pesoMemory).sort();
+  const filasPeso = keysPeso.map(key=>{
+    const mem=pesoMemory[key];
+    const ult=mem.pesos[mem.pesos.length-1];
+    return`<div class="li">
+      <div class="lim">
+        <div class="lin">⚖️ ${key}</div>
+        <div class="lis">Último: ${ult.peso} kg · Promedio: ${mem.avg} kg · ${mem.total} registro(s)</div>
+        <div style="font-family:var(--mono);font-size:.65rem;color:var(--txt3);margin-top:2px">
+          ${mem.pesos.slice(-3).map(p=>p.peso+'kg').join(' → ')}
+        </div>
+      </div>
+      <button class="btn bred bsm" onclick="olvidarPeso('${key}')">✕</button>
+    </div>`;
+  }).join('');
+
   return`
   <div class="card">
     <div class="ct">🧠 MEMORIA DE PRECIOS (${total} productos)</div>
@@ -1879,17 +1879,24 @@ function pgMemoria(){
     </p>
     ${filas}
     <button class="btn bred bfull" style="margin-top:10px" onclick="limpiarMemoria()">
-      🗑️ BORRAR TODA LA MEMORIA
+      🗑️ BORRAR TODA LA MEMORIA DE PRECIOS
     </button>
   </div>
 
-  <!-- MEMORIA DE PESOS -->
-  ${renderMemoriaPesos()}
+  <div class="card">
+    <div class="ct">⚖️ MEMORIA DE PESOS (${keysPeso.length} productos)</div>
+    <p style="font-family:var(--mono);font-size:.72rem;color:var(--txt3);margin-bottom:14px;line-height:1.7">
+      Aprende el peso total habitual por producto. Si varía ≥15%, muestra una alerta al ingresar.
+    </p>
+    ${filasPeso||'<div class="empty" style="padding:12px"><div>Sin pesos aprendidos aún. Ingresá pesos en la tabla.</div></div>'}
+    ${keysPeso.length?`<button class="btn bred bfull" style="margin-top:10px" onclick="limpiarPesoMemoria()">🗑️ BORRAR MEMORIA DE PESOS</button>`:''}
+  </div>
 
   <div class="card" style="border-color:var(--accent)">
     <div class="ct">💾 BACKUP DE DATOS</div>
     <p style="font-family:var(--mono);font-size:.72rem;color:var(--txt3);margin-bottom:14px;line-height:1.7">
-      Exporta tus datos antes de actualizar la app o para pasarlos a otro dispositivo.
+      Exportá tus datos antes de actualizar la app o para pasarlos a otro dispositivo.
+      Los datos incluyen compras, gastos, ventas, memoria de precios y pesos.
     </p>
     <button class="btn bblue bfull" style="margin-bottom:8px" onclick="exportarDatos()">
       📤 EXPORTAR TODOS LOS DATOS
@@ -1898,45 +1905,6 @@ function pgMemoria(){
       📥 IMPORTAR DATOS (restaurar backup)
     </button>
   </div>`;
-}
-
-function renderMemoriaPesos(){
-  const wkeys = Object.keys(weightMemory).sort();
-  if(!wkeys.length) return `
-    <div class="card">
-      <div class="ct">⚖️ MEMORIA DE PESOS</div>
-      <div class="empty"><div class="ico">⚖️</div>Todavia no aprendi ningun peso.
-        <div style="margin-top:8px;opacity:.6">Carga pesos en la tabla y la app empezara a aprender.</div>
-      </div>
-    </div>`;
-  const filasPesos = wkeys.map(key=>{
-    const mem = weightMemory[key];
-    const ultimo = mem.pesos[mem.pesos.length-1];
-    const ultimos = mem.pesos.slice(-3).map(p=>p.pt+'kg').join(' → ');
-    const trend = mem.pesos.length>=2
-      ? ultimo.pt > mem.pesos[mem.pesos.length-2].pt ? '📈'
-      : ultimo.pt < mem.pesos[mem.pesos.length-2].pt ? '📉' : '➡️'
-      : '➡️';
-    return `<div class="li">
-      <div class="lim">
-        <div class="lin">${key} ${trend}</div>
-        <div class="lis">Ultimo: ${ultimo.pt}kg · Rango: ${mem.min}–${mem.max}kg · ${mem.total} registro(s)</div>
-        <div style="font-family:var(--mono);font-size:.65rem;color:var(--txt3);margin-top:2px">${ultimos}</div>
-      </div>
-      <button class="btn bred bsm" onclick="olvidarPeso('${key}')">✕</button>
-    </div>`;
-  }).join('');
-  return `
-    <div class="card">
-      <div class="ct">⚖️ MEMORIA DE PESOS (${wkeys.length} productos)</div>
-      <p style="font-family:var(--mono);font-size:.72rem;color:var(--txt3);margin-bottom:14px;line-height:1.7">
-        La app aprende el peso tipico de cada producto. Te avisa si el peso cambia mas del 15%.
-      </p>
-      ${filasPesos}
-      <button class="btn bred bfull" style="margin-top:10px" onclick="limpiarMemoriaPesos()">
-        🗑️ Borrar memoria de pesos
-      </button>
-    </div>`;
 }
 
 function olvidarProducto(key){
@@ -1950,14 +1918,28 @@ function limpiarMemoria(){
   if(!confirm('¿Borrar TODA la memoria de precios aprendidos?'))return;
   priceMemory={};
   localStorage.setItem(KEY_PRECIOS, JSON.stringify(priceMemory));
-  toast('🗑️ Memoria borrada');render();
+  toast('🗑️ Memoria de precios borrada');render();
+}
+
+function olvidarPeso(key){
+  if(!confirm('¿Olvidar el peso aprendido de "'+key+'"?'))return;
+  delete pesoMemory[key];
+  localStorage.setItem(KEY_PESO_MEM, JSON.stringify(pesoMemory));
+  toast('🗑️ Peso olvidado');render();
+}
+
+function limpiarPesoMemoria(){
+  if(!confirm('¿Borrar TODA la memoria de pesos?'))return;
+  pesoMemory={};
+  localStorage.setItem(KEY_PESO_MEM, JSON.stringify(pesoMemory));
+  toast('🗑️ Memoria de pesos borrada');render();
 }
 
 function exportarDatos(){
   const backup = JSON.stringify({
-    db, priceMemory, weightMemory,
+    db, priceMemory, pesoMemory, cierres,
     exportado: new Date().toLocaleString('es-PY'),
-    version: 'verdapp-v6'
+    version: 'verdapp-v14'
   }, null, 2);
   // Intentar copiar al portapapeles
   if(navigator.clipboard){
@@ -1993,9 +1975,13 @@ function importarDatos(){
       priceMemory = parsed.priceMemory;
       localStorage.setItem(KEY_PRECIOS, JSON.stringify(priceMemory));
     }
-    if(parsed.weightMemory){
-      weightMemory = parsed.weightMemory;
-      localStorage.setItem(KEY_WMEM, JSON.stringify(weightMemory));
+    if(parsed.pesoMemory){
+      pesoMemory = parsed.pesoMemory;
+      localStorage.setItem(KEY_PESO_MEM, JSON.stringify(pesoMemory));
+    }
+    if(parsed.cierres){
+      cierres = parsed.cierres;
+      saveCierres();
     }
     toast('✅ Datos restaurados correctamente');
     render();
@@ -2128,264 +2114,162 @@ function pgBalance(){
   `;
 }
 
+
 /* ═══════════════════════════════════════════════════════
    TAB CIERRE SEMANAL
 ═══════════════════════════════════════════════════════ */
-const KEY_CIERRES = 'verdapp_cierres_v1';
-let cierres = [];
-
-function loadCierres(){
-  try{ const r=localStorage.getItem(KEY_CIERRES); if(r) cierres=JSON.parse(r); } catch(e){}
+function buildMsgCierre(c) {
+  const s = c.semana;
+  const lines = [
+    '📋 CIERRE SEMANAL — VerdApp',
+    '',
+    `📅 Semana: ${lbl(s.ini)} → ${lbl(s.fin)}`,
+    `📅 Cerrado: ${lbl(c.fecha)}`,
+    '',
+    '── RESULTADO ──',
+    `💰 Ventas:       ${fm(c.tv)}`,
+    `🛒 Compras:      ${fm(c.deuda)}`,
+    `💸 Gastos:       ${fm(c.tg)}`,
+    `📈 GANANCIA:     ${fm(c.res)}`,
+    `📊 Margen:       ${c.margenPct}%`,
+    ''
+  ];
+  if(c.tdesc > 0) lines.push(`✅ Descuentos aplicados: ${fm(c.tdesc)}`, '');
+  if(c.nota) lines.push(`📝 Nota: ${c.nota}`, '');
+  lines.push('━━━━━━━━━━━━━━━━━━━━━');
+  return lines.join('\n');
 }
-function saveCierres(){
-  localStorage.setItem(KEY_CIERRES, JSON.stringify(cierres));
-}
-loadCierres();
 
-function pgCierre(){
+function ejecutarCierre() {
   const s = semana();
   const b = calcBalance(enSem);
-
-  // Detalle por día de la semana
-  const diasSem = [];
-  for(let i=0;i<7;i++){
-    const d=new Date(s.ini+'T12:00');
-    d.setDate(d.getDate()+i);
-    diasSem.push(toISO(d));
-  }
-
-  // Desglose gastos por tipo
-  const gs = db.gastos.filter(g=>enSem(g.fecha));
-  const gastosTipo = {};
-  gs.forEach(g=>{ gastosTipo[g.tipo]=(gastosTipo[g.tipo]||0)+g.monto; });
-
-  // Ventas por método
-  const vs = db.ventas.filter(v=>enSem(v.fecha));
-  const vMet = vs.reduce((a,v)=>({ef:a.ef+v.efectivo,tf:a.tf+v.transferencia,ps:a.ps+v.pos}),{ef:0,tf:0,ps:0});
-
-  // Pendientes sin precio
-  const pendCount = db.compras.filter(c=>enSem(c.fecha)&&c.pendiente).length;
-
-  const yaHayCierre = cierres.find(c=>c.semIni===s.ini);
-
-  const filaDias = diasSem.map(f=>{
-    const bd = calcBalance(iso=>iso===f);
-    if(!bd.tv&&!bd.tc&&!bd.tg) return `<div class="sr" style="opacity:.3">
-      <span class="sl">${lbl(f)}</span>
-      <span style="font-family:var(--mono);font-size:.7rem;color:var(--txt3)">sin datos</span>
-    </div>`;
-    const col = bd.res>=0?'pos':'neg';
-    return`<div class="sr">
-      <div>
-        <div class="sl">${lbl(f)} ${bd.res>=0?'📈':'📉'}</div>
-        <div style="font-family:var(--mono);font-size:.67rem;color:var(--txt3)">
-          V:${fm(bd.tv)} · C:${fm(bd.deuda)} · G:${fm(bd.tg)}
-        </div>
-      </div>
-      <span class="sv ${col}">${fm(bd.res)}</span>
-    </div>`;
-  }).join('');
-
-  const historial = [...cierres].reverse().map(c=>{
-    const col = c.resultado>=0?'#4ade80':'var(--danger)';
-    return`<div class="card" style="border-color:var(--border);margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
-        <div>
-          <div style="font-family:var(--mono);font-size:.72rem;color:var(--accent);font-weight:700">
-            📋 ${lbl(c.semIni)} → ${lbl(c.semFin)}
-          </div>
-          <div style="font-family:var(--mono);font-size:.63rem;color:var(--txt3);margin-top:2px">
-            Cerrado: ${c.fechaCierre}
-          </div>
-        </div>
-        <button class="btn bred bsm" onclick="eliminarCierre('${c.id}')">✕</button>
-      </div>
-      <div class="sgrid" style="margin-bottom:10px">
-        <div class="bstat"><div class="l">VENTAS</div><div class="v pos" style="font-size:1.2rem">${fm(c.ventas)}</div></div>
-        <div class="bstat"><div class="l">COMPRAS</div><div class="v neg" style="font-size:1.2rem">${fm(c.compras)}</div></div>
-        <div class="bstat"><div class="l">GASTOS</div><div class="v neg" style="font-size:1.2rem">${fm(c.gastos)}</div></div>
-        <div class="bstat"><div class="l">RESULTADO</div><div class="v" style="font-size:1.2rem;color:${col}">${fm(c.resultado)}</div></div>
-      </div>
-      <div style="display:flex;gap:8px">
-        <button class="btn bghost bsm bfull" onclick="exportarCierre('${c.id}')">📤 Exportar</button>
-        <button class="btn bgreen bsm bfull" onclick="compartirCierreWA('${c.id}')">📱 WhatsApp</button>
-      </div>
-    </div>`;
-  }).join('') || `<div class="empty"><div class="ico">📋</div>No hay cierres anteriores</div>`;
-
-  return`
-  <!-- RESUMEN SEMANA ACTUAL -->
-  <div class="card" style="border-color:${b.res>=0?'var(--accent)':'var(--danger)'}">
-    <div class="ct">${b.res>=0?'📈':'📉'} SEMANA ACTUAL · ${lbl(s.ini)} → ${lbl(s.fin)}</div>
-    <div class="sgrid" style="margin-bottom:12px">
-      <div class="bstat"><div class="l">VENTAS</div><div class="v pos">${fm(b.tv)}</div></div>
-      <div class="bstat"><div class="l">COMPRAS</div><div class="v neg">${fm(b.deuda)}</div></div>
-      <div class="bstat"><div class="l">GASTOS</div><div class="v neg">${fm(b.tg)}</div></div>
-      <div class="bstat"><div class="l">RESULTADO</div><div class="v ${b.res>=0?'pos':'neg'}">${fm(b.res)}</div></div>
-    </div>
-    <div style="background:var(--bg3);border-radius:10px;padding:12px;margin-bottom:12px">
-      <div class="sr"><span class="sl">Ventas totales</span><span class="sv pos">${fm(b.tv)}</span></div>
-      <div class="sr"><span class="sl">— Deuda proveedor</span><span class="sv neg">- ${fm(b.deuda)}</span></div>
-      <div class="sr"><span class="sl">— Gastos operativos</span><span class="sv neg">- ${fm(b.tg)}</span></div>
-      <div class="sr" style="border-top:2px solid var(--border);margin-top:4px;padding-top:10px">
-        <span class="sl" style="font-weight:700">GANANCIA NETA</span>
-        <span class="sv ${b.res>=0?'pos':'neg'}" style="font-size:1.3rem;font-weight:800">${fm(b.res)}</span>
-      </div>
-      <div class="sr"><span class="sl">Margen sobre ventas</span><span class="sv ${b.res>=0?'pos':'neg'}">${b.margenPct}%</span></div>
-    </div>
-
-    <!-- Detalle por día -->
-    <div style="font-family:var(--mono);font-size:.7rem;color:var(--txt3);margin-bottom:8px;letter-spacing:1px">DETALLE POR DÍA</div>
-    ${filaDias}
-  </div>
-
-  <!-- Gastos por tipo -->
-  <div class="card">
-    <div class="ct">💸 GASTOS POR TIPO · ESTA SEMANA</div>
-    ${Object.keys(gastosTipo).length
-      ? Object.entries(gastosTipo).map(([k,v])=>`<div class="sr">
-          <span class="sl">${k.toUpperCase()}</span>
-          <span class="sv neg">${fm(v)}</span>
-        </div>`).join('')
-      : `<div class="empty"><div class="ico">💸</div>Sin gastos esta semana</div>`}
-  </div>
-
-  <!-- Ventas por método -->
-  <div class="card">
-    <div class="ct">💰 VENTAS POR MÉTODO · ESTA SEMANA</div>
-    <div class="sr"><span class="sl">Efectivo</span><span class="sv pos">${fm(vMet.ef)}</span></div>
-    <div class="sr"><span class="sl">Transferencia</span><span class="sv pos">${fm(vMet.tf)}</span></div>
-    <div class="sr"><span class="sl">POS</span><span class="sv pos">${fm(vMet.ps)}</span></div>
-    <div class="sr" style="border-top:2px solid var(--border);margin-top:4px;padding-top:10px">
-      <span class="sl" style="font-weight:700">TOTAL COBRADO</span>
-      <span class="sv pos" style="font-size:1.1rem">${fm(vMet.ef+vMet.tf+vMet.ps)}</span>
-    </div>
-  </div>
-
-  <!-- Botón cerrar semana -->
-  ${pendCount>0?`<div style="background:#1e1030;border:1px solid var(--purple);border-radius:12px;padding:12px;margin-bottom:14px;font-family:var(--mono);font-size:.75rem;color:var(--purple)">
-    ⚠️ Hay <b>${pendCount}</b> producto(s) sin precio. Se recomienda completarlos antes de cerrar.
-  </div>`:''}
-
-  <button class="btn ${yaHayCierre?'bghost':'bg'} bfull" style="margin-bottom:14px" onclick="cerrarSemana()">
-    ${yaHayCierre?'🔄 REEMPLAZAR CIERRE DE ESTA SEMANA':'✅ CERRAR SEMANA Y GUARDAR RESUMEN'}
-  </button>
-
-  <!-- Historial de cierres -->
-  <div style="font-family:var(--mono);font-size:.72rem;color:var(--txt3);letter-spacing:1px;margin-bottom:10px">
-    📁 CIERRES ANTERIORES
-  </div>
-  ${historial}
-  `;
-}
-
-function cerrarSemana(){
-  const s = semana();
-  const b = calcBalance(enSem);
-  const gs = db.gastos.filter(g=>enSem(g.fecha));
-  const vs = db.ventas.filter(v=>enSem(v.fecha));
-  const gastosTipo = {};
-  gs.forEach(g=>{ gastosTipo[g.tipo]=(gastosTipo[g.tipo]||0)+g.monto; });
-  const vMet = vs.reduce((a,v)=>({ef:a.ef+v.efectivo,tf:a.tf+v.transferencia,ps:a.ps+v.pos}),{ef:0,tf:0,ps:0});
-
-  // Detalle por día
-  const diasSem=[];
-  for(let i=0;i<7;i++){
-    const d=new Date(s.ini+'T12:00');d.setDate(d.getDate()+i);diasSem.push(toISO(d));
-  }
-  const porDia = diasSem.map(f=>{
-    const bd=calcBalance(iso=>iso===f);
-    return {fecha:f, ventas:bd.tv, compras:bd.deuda, gastos:bd.tg, resultado:bd.res};
-  }).filter(d=>d.ventas||d.compras||d.gastos);
-
-  const cierre = {
+  const nota = document.getElementById('cierre-nota') ? document.getElementById('cierre-nota').value.trim() : '';
+  const nuevo = {
     id: uid(),
-    semIni: s.ini,
-    semFin: s.fin,
-    fechaCierre: new Date().toLocaleString('es-PY'),
-    ventas: b.tv,
-    compras: b.deuda,
-    gastos: b.tg,
-    resultado: b.res,
-    margen: b.margenPct,
-    gastosTipo,
-    ventasPorMetodo: vMet,
-    porDia
+    fecha: hoy(),
+    semana: s,
+    tc: b.tc, tdesc: b.tdesc, deuda: b.deuda,
+    tg: b.tg, tv: b.tv, res: b.res,
+    margenPct: b.margenPct,
+    nota: nota
   };
-
-  // Reemplazar si ya existe para esta semana
-  cierres = cierres.filter(c=>c.semIni!==s.ini);
-  cierres.push(cierre);
+  cierres.unshift(nuevo);
   saveCierres();
-  toast('✅ Cierre semanal guardado');
+  toast('✅ Cierre guardado');
   render();
 }
 
-function eliminarCierre(id){
-  if(!confirm('¿Eliminar este cierre?'))return;
-  cierres=cierres.filter(c=>c.id!==id);
+function eliminarCierre(id) {
+  if(!confirm('¿Eliminar este cierre?')) return;
+  cierres = cierres.filter(c => c.id !== id);
   saveCierres();
   toast('🗑️ Cierre eliminado');
   render();
 }
 
-function textoCierre(id){
-  const c=cierres.find(x=>x.id===id); if(!c) return '';
-  const lineas=[
-    `📋 CIERRE SEMANAL`,
-    `📅 ${lbl(c.semIni)} → ${lbl(c.semFin)}`,
-    ``,
-    `💰 VENTAS:     ${fm(c.ventas)}`,
-    `📦 COMPRAS:    ${fm(c.compras)}`,
-    `💸 GASTOS:     ${fm(c.gastos)}`,
-    ``,
-    `✅ GANANCIA:   ${fm(c.resultado)}`,
-    `📊 MARGEN:     ${c.margen}%`,
-    ``,
-    `── GASTOS POR TIPO ──`,
-    ...Object.entries(c.gastosTipo||{}).map(([k,v])=>`  ${k}: ${fm(v)}`),
-    ``,
-    `── VENTAS POR MÉTODO ──`,
-    `  Efectivo:       ${fm(c.ventasPorMetodo?.ef||0)}`,
-    `  Transferencia:  ${fm(c.ventasPorMetodo?.tf||0)}`,
-    `  POS:            ${fm(c.ventasPorMetodo?.ps||0)}`,
-    ``,
-    `── DETALLE POR DÍA ──`,
-    ...(c.porDia||[]).map(d=>`  ${lbl(d.fecha)}: V:${fm(d.ventas)} C:${fm(d.compras)} G:${fm(d.gastos)} → ${fm(d.resultado)}`),
-    ``,
-    `Generado: ${c.fechaCierre}`,
-    `VerdApp`
-  ];
-  return lineas.join('\n');
-}
-
-function exportarCierre(id){
-  const c=cierres.find(x=>x.id===id); if(!c) return;
-  const texto = textoCierre(id);
-  // Intentar copiar
-  if(navigator.clipboard){
-    navigator.clipboard.writeText(texto)
-      .then(()=>toast('✅ Cierre copiado al portapapeles'))
-      .catch(()=>descargarCierre(id,texto));
+function exportarCierres() {
+  const lines = cierres.map(c => buildMsgCierre(c)).join('\n\n');
+  if(!lines) { toast('⚠️ Sin cierres para exportar'); return; }
+  if(navigator.clipboard) {
+    navigator.clipboard.writeText(lines)
+      .then(() => toast('✅ Historial copiado al portapapeles'))
+      .catch(() => descargarBackup(lines));
   } else {
-    descargarCierre(id,texto);
+    const blob = new Blob([lines], {type:'text/plain'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'cierres-verdapp-'+hoy()+'.txt';
+    a.click(); URL.revokeObjectURL(url);
+    toast('✅ Historial descargado');
   }
 }
 
-function descargarCierre(id, texto){
-  const c=cierres.find(x=>x.id===id); if(!c) return;
-  const blob=new Blob([texto],{type:'text/plain;charset=utf-8'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  a.href=url;a.download=`cierre-${c.semIni}.txt`;a.click();
-  URL.revokeObjectURL(url);
-  toast('✅ Cierre descargado');
-}
+function pgCierre() {
+  const s = semana();
+  const b = calcBalance(enSem);
+  const resColor = b.res >= 0 ? 'var(--accent)' : 'var(--danger)';
+  const resIcon  = b.res >= 0 ? '📈' : '📉';
 
-function compartirCierreWA(id){
-  const texto = textoCierre(id);
-  // Abrir WhatsApp con el primer número
-  window.open('https://wa.me/'+WA_NUMS[0]+'?text='+encodeURIComponent(texto),'_blank');
+  const historial = cierres.map(c => {
+    const msg = buildMsgCierre(c);
+    return `<div class="card" style="margin-bottom:10px;border-color:${c.res>=0?'var(--border)':'var(--danger)'}">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div>
+          <div style="font-family:var(--mono);font-size:.72rem;color:var(--txt2);font-weight:700">
+            ${lbl(c.semana.ini)} → ${lbl(c.semana.fin)}
+          </div>
+          <div style="font-family:var(--mono);font-size:.65rem;color:var(--txt3)">Cerrado el ${lbl(c.fecha)}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-family:var(--mono);font-size:1rem;font-weight:800;color:${c.res>=0?'#4ade80':'var(--danger)'}">
+            ${fm(c.res)}
+          </span>
+          <button class="btn bred bsm" onclick="eliminarCierre('${c.id}')">✕</button>
+        </div>
+      </div>
+      <div style="background:var(--bg3);border-radius:8px;padding:10px;font-family:var(--mono);font-size:.72rem">
+        <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+          <span style="color:var(--txt3)">Ventas</span><span style="color:#4ade80">${fm(c.tv)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+          <span style="color:var(--txt3)">Compras</span><span style="color:var(--danger)">${fm(c.deuda)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+          <span style="color:var(--txt3)">Gastos</span><span style="color:var(--danger)">${fm(c.tg)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding-top:6px;border-top:1px solid var(--border)">
+          <span style="color:var(--txt2);font-weight:700">Ganancia</span>
+          <span style="color:${c.res>=0?'#4ade80':'var(--danger)'};font-weight:700">${fm(c.res)} (${c.margenPct}%)</span>
+        </div>
+        ${c.nota?`<div style="margin-top:6px;color:var(--txt3)">📝 ${c.nota}</div>`:''}
+      </div>
+      <div style="margin-top:8px">
+        ${WA_NUMS.map((n,i)=>`<button class="wa-btn" onclick="waOpen('${n}','',buildMsgCierre(cierres.find(x=>x.id==='${c.id}')))" style="margin-bottom:4px;font-size:.7rem;padding:8px">📱 Enviar al ${WA_NOMBRES[i]}</button>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+
+  return`
+  <!-- Resumen semana actual para cierre -->
+  <div class="card" style="border-color:${resColor}">
+    <div class="ct">${resIcon} CIERRE SEMANAL — ${lbl(s.ini)} → ${lbl(s.fin)}</div>
+    <div class="sgrid" style="margin-bottom:12px">
+      <div class="bstat"><div class="l">VENTAS</div><div class="v pos">${fm(b.tv)}</div></div>
+      <div class="bstat"><div class="l">COMPRAS</div><div class="v neg">${fm(b.deuda)}</div></div>
+      <div class="bstat"><div class="l">GASTOS</div><div class="v neg">${fm(b.tg)}</div></div>
+      <div class="bstat"><div class="l">GANANCIA</div><div class="v" style="color:${resColor}">${fm(b.res)}</div></div>
+    </div>
+    <div style="background:var(--bg3);border-radius:10px;padding:12px;margin-bottom:14px">
+      <div class="sr"><span class="sl">Ventas</span><span class="sv pos">${fm(b.tv)}</span></div>
+      <div class="sr"><span class="sl">— Compras (neto)</span><span class="sv neg">- ${fm(b.deuda)}</span></div>
+      <div class="sr"><span class="sl">— Gastos</span><span class="sv neg">- ${fm(b.tg)}</span></div>
+      ${b.tdesc>0?`<div class="sr"><span class="sl" style="color:var(--accent)">Descuentos recibidos</span><span class="sv pos">+ ${fm(b.tdesc)}</span></div>`:''}
+      <div class="sr" style="border-top:2px solid var(--border);margin-top:4px;padding-top:10px">
+        <span class="sl" style="font-weight:700">GANANCIA NETA</span>
+        <span class="sv" style="color:${resColor};font-size:1.3rem;font-weight:800">${fm(b.res)}</span>
+      </div>
+      <div class="sr"><span class="sl">Margen</span><span class="sv" style="color:${resColor}">${b.margenPct}%</span></div>
+    </div>
+    <div style="margin-bottom:10px">
+      <label>NOTA DEL CIERRE (opcional)</label>
+      <input id="cierre-nota" placeholder="Semana tranquila, lluvia miércoles…"/>
+    </div>
+    <button class="btn bg bfull" style="margin-bottom:8px" onclick="ejecutarCierre()">
+      📋 GUARDAR CIERRE DE ESTA SEMANA
+    </button>
+    ${WA_NUMS.map((n,i)=>`<button class="wa-btn" onclick="waOpen('${n}','',buildMsgCierre({semana:semana(),fecha:hoy(),tc:${b.tc},tdesc:${b.tdesc},deuda:${b.deuda},tg:${b.tg},tv:${b.tv},res:${b.res},margenPct:${b.margenPct},nota:document.getElementById('cierre-nota')?document.getElementById('cierre-nota').value:''}))">📱 Enviar cierre por WA a ${WA_NOMBRES[i]}</button>`).join('')}
+  </div>
+
+  <!-- Historial de cierres -->
+  <div class="card">
+    <div class="ct">📚 HISTORIAL DE CIERRES (${cierres.length})</div>
+    ${cierres.length ? `
+      <button class="btn bghost bfull" style="margin-bottom:12px" onclick="exportarCierres()">
+        📤 EXPORTAR HISTORIAL COMPLETO
+      </button>
+      ${historial}
+    ` : `<div class="empty"><div class="ico">📋</div>Sin cierres guardados aún.<br>Guardá el primer cierre arriba.</div>`}
+  </div>`;
 }
 
 /* ═══════════════════════════════════════════════════════
