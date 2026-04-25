@@ -2422,7 +2422,7 @@ function pgMayorista(){
   return pgMayMenu();
 }
 
-function mayVista(v){ window.mayVista=v; render(); }
+function setMayVista(v){ window.mayVista=v; render(); }
 
 function pgMayMenu(){
   const hp=dbMay.pedidos.filter(p=>p.fecha===hoy());
@@ -2437,11 +2437,11 @@ function pgMayMenu(){
     </div>
     <div style="display:flex;flex-direction:column;gap:10px">
       <button class="btn bg bfull" onclick="iniciarNuevoPedido()">📋 NUEVO PEDIDO</button>
-      <button class="btn bghost bfull" onclick="mayVista('historial')">📅 HISTORIAL</button>
-      <button class="btn bghost bfull" onclick="mayVista('reclamos')">🔴 RECLAMOS</button>
-      <button class="btn bghost bfull" onclick="mayVista('resumen')">📊 RESUMEN POR PERÍODO</button>
-      <button class="btn bghost bfull" onclick="mayVista('clientes')">👥 CLIENTES</button>
-      <button class="btn bblue bfull" onclick="mayVista('proveedor')">🔄 LISTA PROVEEDOR</button>
+      <button class="btn bghost bfull" onclick="setMayVista('historial')">📅 HISTORIAL</button>
+      <button class="btn bghost bfull" onclick="setMayVista('reclamos')">🔴 RECLAMOS</button>
+      <button class="btn bghost bfull" onclick="setMayVista('resumen')">📊 RESUMEN POR PERÍODO</button>
+      <button class="btn bghost bfull" onclick="setMayVista('clientes')">👥 CLIENTES</button>
+      <button class="btn bblue bfull" onclick="setMayVista('proveedor')">🔄 LISTA PROVEEDOR</button>
     </div>
   </div>`;
 }
@@ -2451,7 +2451,7 @@ function pgMayClientes(){
   <div class="card">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
       <div class="ct" style="margin-bottom:0">👥 CLIENTES</div>
-      <button class="btn bghost bsm" onclick="mayVista('menu')">← Volver</button>
+      <button class="btn bghost bsm" onclick="setMayVista('menu')">← Volver</button>
     </div>
     <div class="g2" style="margin-bottom:10px">
       <div><label>NOMBRE</label><input id="cli-nom" placeholder="Nombre del cliente"/></div>
@@ -2484,70 +2484,113 @@ function eliminarCliente(id){
 }
 
 function iniciarNuevoPedido(){
-  if(!dbMay.clientes.length){toast('⚠️ Primero agregá un cliente');mayVista('clientes');return;}
+  if(!dbMay.clientes.length){toast('⚠️ Primero agregá un cliente');setMayVista('clientes');return;}
   pedidoActual={clienteId:null,items:[],fecha:hoy()};
-  mayVista('nuevo');
+  setMayVista('nuevo');
 }
 
 function iniciarPedidoCliente(id){
   pedidoActual={clienteId:id,items:[],fecha:hoy()};
-  mayVista('nuevo');
+  setMayVista('nuevo');
 }
 
 function pgMayNuevoPedido(){
   const total=pedidoActual.items.reduce((s,i)=>s+i.total,0);
-  const itemsHtml=pedidoActual.items.map((it,i)=>`
-    <div class="li">
-      <div class="lim"><div class="lin">${it.nombre}</div>
-        <div class="lis">${it.cantidad} ${it.tipo} × ${fm(it.precio)}</div></div>
-      <div style="display:flex;align-items:center;gap:6px">
-        <div class="lia">${fm(it.total)}</div>
-        <button class="btn bred bsm" onclick="quitarItemPedido(${i})">✕</button>
-      </div>
-    </div>`).join('');
+
+  // Tabla de items con todas las columnas
+  const tablaItems = pedidoActual.items.length ? `
+    <div style="overflow-x:auto;margin-bottom:12px">
+      <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:.72rem">
+        <thead>
+          <tr style="background:var(--bg3);color:var(--txt2)">
+            <th style="padding:6px 4px;text-align:left">PRODUCTO</th>
+            <th style="padding:6px 4px;text-align:right">PRECIO</th>
+            <th style="padding:6px 4px;text-align:right">PESO</th>
+            <th style="padding:6px 4px;text-align:center">TIPO</th>
+            <th style="padding:6px 4px;text-align:right">CANT.</th>
+            <th style="padding:6px 4px;text-align:right">DESC.</th>
+            <th style="padding:6px 4px;text-align:right">TOTAL</th>
+            <th style="padding:6px 4px"></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${pedidoActual.items.map((it,i)=>`
+          <tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:6px 4px;color:var(--txt1)">${it.nombre}</td>
+            <td style="padding:6px 4px;text-align:right">${fm(it.precio)}</td>
+            <td style="padding:6px 4px;text-align:right">${it.peso||'—'}</td>
+            <td style="padding:6px 4px;text-align:center">${it.tipo}</td>
+            <td style="padding:6px 4px;text-align:right">${it.cantidad}</td>
+            <td style="padding:6px 4px;text-align:right;color:var(--danger)">${it.desc>0?it.desc:'—'}</td>
+            <td style="padding:6px 4px;text-align:right;color:var(--accent)">${fm(it.total)}</td>
+            <td style="padding:4px"><button class="btn bred bsm" onclick="quitarItemPedido(${i})">✕</button></td>
+          </tr>`).join('')}
+        </tbody>
+        <tfoot>
+          <tr style="background:var(--bg3)">
+            <td colspan="6" style="padding:8px 4px;font-weight:700">TOTAL PEDIDO</td>
+            <td style="padding:8px 4px;text-align:right;color:var(--accent);font-size:1rem;font-weight:800">${fm(total)}</td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>` : '<div class="empty"><div class="ico">📦</div>Sin productos aún</div>';
+
   return`
   <div class="card">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
       <div class="ct" style="margin-bottom:0">📋 NUEVO PEDIDO</div>
-      <button class="btn bghost bsm" onclick="mayVista('menu')">← Volver</button>
+      <button class="btn bghost bsm" onclick="setMayVista('menu')">← Volver</button>
     </div>
-    <div style="margin-bottom:10px">
-      <label>CLIENTE</label>
-      <select id="ped-cliente" onchange="pedidoActual.clienteId=this.value">
-        <option value="">— Elegir cliente —</option>
-        ${dbMay.clientes.map(cl=>`<option value="${cl.id}" ${pedidoActual.clienteId===cl.id?'selected':''}>${cl.nombre}</option>`).join('')}
-      </select>
+
+    <div class="g2" style="margin-bottom:12px">
+      <div>
+        <label>CLIENTE</label>
+        <select id="ped-cliente" onchange="pedidoActual.clienteId=this.value">
+          <option value="">— Elegir —</option>
+          ${dbMay.clientes.map(cl=>`<option value="${cl.id}" ${pedidoActual.clienteId===cl.id?'selected':''}>${cl.nombre}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label>FECHA</label>
+        <input type="date" value="${pedidoActual.fecha||hoy()}" onchange="pedidoActual.fecha=this.value"/>
+      </div>
     </div>
-    <div style="margin-bottom:12px">
-      <label>FECHA</label>
-      <input type="date" value="${pedidoActual.fecha||hoy()}" onchange="pedidoActual.fecha=this.value"/>
-    </div>
+
+    <!-- Tabla de productos -->
+    ${tablaItems}
+
+    <!-- Formulario agregar producto -->
     <div style="background:var(--bg3);border-radius:10px;padding:12px;margin-bottom:12px">
       <div class="ct" style="margin-bottom:10px;font-size:.68rem">➕ AGREGAR PRODUCTO</div>
-      <div class="g2">
-        <div><label>PRODUCTO</label>
-          <input id="ped-nom" list="prod-list-may" placeholder="Nombre..."/>
-          <datalist id="prod-list-may">
-            ${(typeof PRODUCTOS_DEFAULT!=='undefined'?PRODUCTOS_DEFAULT:[]).map(p=>`<option value="${p}">`).join('')}
-          </datalist>
-        </div>
-        <div><label>TIPO</label>
-          <select id="ped-tipo"><option>caja</option><option>kilo</option><option>unidad</option></select>
-        </div>
+      <div style="margin-bottom:8px">
+        <label>PRODUCTO</label>
+        <input id="ped-nom" list="prod-list-may" placeholder="Nombre del producto..."/>
+        <datalist id="prod-list-may">
+          ${(typeof PRODUCTOS_DEFAULT!=='undefined'?PRODUCTOS_DEFAULT:[]).map(p=>`<option value="${p}">`).join('')}
+        </datalist>
+      </div>
+      <div class="g2" style="margin-bottom:8px">
+        <div><label>PRECIO Gs.</label><input id="ped-precio" type="number" placeholder="150000"/></div>
+        <div><label>PESO kg</label><input id="ped-peso" type="number" step="0.1" placeholder="0"/></div>
       </div>
       <div class="g2" style="margin-bottom:10px">
+        <div><label>TIPO CAJA</label>
+          <select id="ped-tipo">
+            <option>caja</option><option>kilo</option><option>unidad</option>
+          </select>
+        </div>
         <div><label>CANTIDAD</label><input id="ped-cant" type="number" min="1" placeholder="1"/></div>
-        <div><label>PRECIO Gs.</label><input id="ped-precio" type="number" placeholder="150000"/></div>
+      </div>
+      <div style="margin-bottom:10px">
+        <label>DESCOMPUESTOS (cantidad)</label>
+        <input id="ped-desc" type="number" min="0" placeholder="0"/>
       </div>
       <button class="btn bg bfull" onclick="agregarItemPedido()">+ AGREGAR</button>
     </div>
-    ${pedidoActual.items.length?itemsHtml:'<div class="empty"><div class="ico">📦</div>Sin productos</div>'}
+
     ${pedidoActual.items.length?`
-    <div style="background:var(--bg3);border-radius:10px;padding:12px;margin-top:12px">
-      <div class="sr"><span class="sl" style="font-weight:700">TOTAL</span>
-        <span class="sv pos" style="font-size:1.3rem">${fm(total)}</span></div>
-    </div>
-    <div style="display:flex;gap:8px;margin-top:12px">
+    <div style="display:flex;gap:8px;margin-top:4px">
       <button class="btn bg bfull" onclick="confirmarPedido()">✅ CONFIRMAR Y ENVIAR</button>
       <button class="btn bghost bsm" onclick="imprimirPedido()">🖨️</button>
     </div>`:''}
@@ -2559,12 +2602,17 @@ function agregarItemPedido(){
   const cant=+document.getElementById('ped-cant').value||1;
   const precio=+document.getElementById('ped-precio').value||0;
   const tipo=document.getElementById('ped-tipo').value;
+  const peso=+document.getElementById('ped-peso').value||0;
+  const desc=+document.getElementById('ped-desc').value||0;
   if(!nom){toast('⚠️ Ingresá el producto');return;}
   if(!precio){toast('⚠️ Ingresá el precio');return;}
-  pedidoActual.items.push({nombre:nom,cantidad:cant,tipo,precio,total:cant*precio});
+  const total=cant*precio;
+  pedidoActual.items.push({nombre:nom,cantidad:cant,tipo,precio,peso:peso||'',desc,total});
   document.getElementById('ped-nom').value='';
   document.getElementById('ped-cant').value='';
   document.getElementById('ped-precio').value='';
+  document.getElementById('ped-peso').value='';
+  document.getElementById('ped-desc').value='';
   render();
 }
 
@@ -2588,7 +2636,7 @@ function confirmarPedido(){
     toast('✅ Copiado al portapapeles');
   }
   pedidoActual={clienteId:null,items:[],fecha:hoy()};
-  mayVista('historial');
+  setMayVista('historial');
 }
 
 function buildMsgPedido(pedido,cliente){
@@ -2615,7 +2663,7 @@ function pgMayHistorial(){
   <div class="card">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
       <div class="ct" style="margin-bottom:0">📅 HISTORIAL</div>
-      <button class="btn bghost bsm" onclick="mayVista('menu')">← Volver</button>
+      <button class="btn bghost bsm" onclick="setMayVista('menu')">← Volver</button>
     </div>
     <input type="date" id="hist-fecha" style="margin-bottom:10px"/>
     ${!pedidos.length?'<div class="empty"><div class="ico">📋</div>Sin pedidos</div>':
@@ -2638,7 +2686,7 @@ function pgMayReclamos(){
   <div class="card">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
       <div class="ct" style="margin-bottom:0">🔴 RECLAMOS</div>
-      <button class="btn bghost bsm" onclick="mayVista('menu')">← Volver</button>
+      <button class="btn bghost bsm" onclick="setMayVista('menu')">← Volver</button>
     </div>
     <div class="g2" style="margin-bottom:10px">
       <div><label>CLIENTE</label>
@@ -2695,7 +2743,7 @@ function pgMayResumen(){
   <div class="card">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
       <div class="ct" style="margin-bottom:0">📊 RESUMEN MAYORISTA</div>
-      <button class="btn bghost bsm" onclick="mayVista('menu')">← Volver</button>
+      <button class="btn bghost bsm" onclick="setMayVista('menu')">← Volver</button>
     </div>
     <div class="g2" style="margin-bottom:14px">
       <div><label>DESDE</label><input type="date" id="res-ini" value="${s.ini}"/></div>
@@ -2738,7 +2786,7 @@ function pgMayProveedor(){
   <div class="card">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
       <div class="ct" style="margin-bottom:0">🔄 LISTA PROVEEDOR</div>
-      <button class="btn bghost bsm" onclick="mayVista('menu')">← Volver</button>
+      <button class="btn bghost bsm" onclick="setMayVista('menu')">← Volver</button>
     </div>
     <p style="font-family:var(--mono);font-size:.72rem;color:var(--txt3);margin-bottom:12px;line-height:1.7">
       Pegá el mensaje del proveedor con código VP- para importar automáticamente al tab IA.
@@ -2762,14 +2810,14 @@ function importarListaProveedor(){
           precioUnit:it.precio,precioTotal:it.precio*it.cantidad,
           pendiente:false,estado:'normal',confianza:'alta'
         }));
-        mayVista('menu');
+        setMayVista('menu');
         go('ia');
         toast('✅ Lista importada — revisá en tab IA');
         return;
       }
     }catch(e){}
   }
-  mayVista('menu');
+  setMayVista('menu');
   go('ia');
   toast('Lista enviada al tab IA');
 }
