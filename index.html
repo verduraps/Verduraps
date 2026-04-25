@@ -2495,19 +2495,12 @@ function iniciarPedidoCliente(id){
 }
 
 function pgMayNuevoPedido(){
-  // Inicializar filas si están vacías — una fila por producto de la lista
+  // Inicializar filas con todos los productos
   if(!pedidoActual.rows){
     pedidoActual.rows = PRODUCTOS_DEFAULT.map(nom=>({
       nombre:nom, precio:'', peso:'', tipo:'caja', cantidad:'', desc:'', total:0
     }));
   }
-
-  const calcRow = (i) => {
-    const r = pedidoActual.rows[i];
-    const p = +r.precio||0;
-    const q = +r.cantidad||0;
-    r.total = p * q;
-  };
 
   const totalGeneral = pedidoActual.rows.reduce((s,r)=>s+(r.total||0),0);
 
@@ -2516,7 +2509,7 @@ function pgMayNuevoPedido(){
       <td style="padding:4px 3px;color:var(--txt1);font-size:.75rem;white-space:nowrap">${r.nombre}</td>
       <td style="padding:2px"><input type="number" value="${r.precio}"
         style="width:90px;font-size:.72rem;padding:4px"
-        oninput="pedidoActual.rows[${i}].precio=this.value;pedidoActual.rows[${i}].total=(+this.value||0)*(+pedidoActual.rows[${i}].cantidad||0);actualizarTotalMay()"
+        oninput="pedidoActual.rows[${i}].precio=this.value;pedidoActual.rows[${i}].total=(+this.value||0)*(+pedidoActual.rows[${i}].cantidad||0);actualizarTotalMay();document.getElementById('sub-${i}').textContent=pedidoActual.rows[${i}].total>0?fm(pedidoActual.rows[${i}].total):'—'"
         placeholder="0"/></td>
       <td style="padding:2px"><input type="number" step="0.1" value="${r.peso}"
         style="width:70px;font-size:.72rem;padding:4px"
@@ -2531,13 +2524,13 @@ function pgMayNuevoPedido(){
       </td>
       <td style="padding:2px"><input type="number" value="${r.cantidad}"
         style="width:60px;font-size:.72rem;padding:4px"
-        oninput="pedidoActual.rows[${i}].cantidad=this.value;pedidoActual.rows[${i}].total=(+pedidoActual.rows[${i}].precio||0)*(+this.value||0);actualizarTotalMay()"
+        oninput="pedidoActual.rows[${i}].cantidad=this.value;pedidoActual.rows[${i}].total=(+pedidoActual.rows[${i}].precio||0)*(+this.value||0);actualizarTotalMay();document.getElementById('sub-${i}').textContent=pedidoActual.rows[${i}].total>0?fm(pedidoActual.rows[${i}].total):'—'"
         placeholder="0"/></td>
       <td style="padding:2px"><input type="number" value="${r.desc||''}"
         style="width:55px;font-size:.72rem;padding:4px;border-color:var(--danger)"
         oninput="pedidoActual.rows[${i}].desc=this.value"
         placeholder="0"/></td>
-      <td style="padding:4px;text-align:right;font-family:var(--mono);font-size:.72rem;color:${r.total>0?'var(--accent)':'var(--txt3)'};white-space:nowrap">
+      <td id="sub-${i}" style="padding:4px;text-align:right;font-family:var(--mono);font-size:.75rem;font-weight:700;color:${r.total>0?'var(--accent)':'var(--txt3)'};white-space:nowrap;min-width:90px">
         ${r.total>0?fm(r.total):'—'}
       </td>
     </tr>`).join('');
@@ -2547,6 +2540,14 @@ function pgMayNuevoPedido(){
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
       <div class="ct" style="margin-bottom:0">📋 NUEVO PEDIDO</div>
       <button class="btn bghost bsm" onclick="setMayVista('menu')">← Volver</button>
+    </div>
+
+    <!-- Pegar lista del cliente -->
+    <div style="background:var(--bg3);border-radius:10px;padding:10px;margin-bottom:10px">
+      <div style="font-family:var(--mono);font-size:.68rem;color:var(--txt2);margin-bottom:6px;letter-spacing:1px">📋 PEGAR LISTA DEL CLIENTE</div>
+      <div style="font-family:var(--mono);font-size:.65rem;color:var(--txt3);margin-bottom:6px">Formato: Tomate 15 · Cebolla 20 · Papa 10</div>
+      <textarea id="may-lista-txt" style="min-height:60px;margin-bottom:6px" placeholder="Tomate 15&#10;Cebolla 20&#10;Papa 10"></textarea>
+      <button class="btn bblue bfull" onclick="aplicarListaMay()">⚡ APLICAR LISTA</button>
     </div>
 
     <div class="g2" style="margin-bottom:10px">
@@ -2573,7 +2574,7 @@ function pgMayNuevoPedido(){
             <th style="padding:6px 4px;text-align:left;min-width:80px">TIPO</th>
             <th style="padding:6px 4px;text-align:left;min-width:65px">CANT.</th>
             <th style="padding:6px 4px;text-align:left;min-width:60px">DESC.</th>
-            <th style="padding:6px 4px;text-align:right;min-width:90px">TOTAL</th>
+            <th style="padding:6px 4px;text-align:right;min-width:90px">SUBTOTAL</th>
           </tr>
         </thead>
         <tbody id="may-tbody">${filas}</tbody>
@@ -2586,12 +2587,58 @@ function pgMayNuevoPedido(){
       </table>
     </div>
 
-    <div style="display:flex;gap:8px;margin-top:12px">
+    <!-- Agregar fila extra -->
+    <button class="btn bghost bfull" style="margin-top:8px" onclick="agregarFilaMay()">+ AGREGAR PRODUCTO EXTRA</button>
+
+    <div style="display:flex;gap:8px;margin-top:10px">
       <button class="btn bg bfull" onclick="confirmarPedidoTabla()">✅ FINALIZAR PEDIDO</button>
       <button class="btn bghost bsm" onclick="imprimirPedidoTabla()">🖨️</button>
     </div>
   </div>`;
 }
+
+function agregarFilaMay(){
+  if(!pedidoActual.rows) pedidoActual.rows=[];
+  const nom = prompt('Nombre del producto:');
+  if(!nom) return;
+  pedidoActual.rows.push({nombre:nom,precio:'',peso:'',tipo:'caja',cantidad:'',desc:'',total:0});
+  render();
+  toast('✅ '+nom+' agregado');
+}
+
+function aplicarListaMay(){
+  const txt = document.getElementById('may-lista-txt').value.trim();
+  if(!txt){toast('⚠️ Pegá la lista primero');return;}
+  let aplicados = 0;
+  const lineas = txt.split(/[\n,·•]+/).map(l=>l.trim()).filter(Boolean);
+  lineas.forEach(linea=>{
+    // Detectar número al final o al principio
+    const m = linea.match(/^(.+?)\s+(\d+(?:[.,]\d+)?)\s*$/) ||
+              linea.match(/^(\d+(?:[.,]\d+)?)\s+(.+)$/);
+    if(!m) return;
+    let nombre, cant;
+    if(/^\d/.test(m[1])){nombre=m[2];cant=+m[1].replace(',','.');}
+    else{nombre=m[1];cant=+m[2].replace(',','.');}
+    nombre = nombre.trim();
+    // Buscar en rows
+    const normNom = s=>s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+    const idx = pedidoActual.rows.findIndex(r=>
+      normNom(r.nombre).includes(normNom(nombre)) ||
+      normNom(nombre).includes(normNom(r.nombre))
+    );
+    if(idx>=0){
+      pedidoActual.rows[idx].cantidad = cant;
+      aplicados++;
+    } else {
+      // Agregar como fila nueva
+      pedidoActual.rows.push({nombre,precio:'',peso:'',tipo:'caja',cantidad:cant,desc:'',total:0});
+      aplicados++;
+    }
+  });
+  render();
+  toast('✅ '+aplicados+' productos aplicados');
+}
+
 
 function actualizarTotalMay(){
   const total = pedidoActual.rows.reduce((s,r)=>s+(r.total||0),0);
