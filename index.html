@@ -2506,8 +2506,8 @@ function pgMayNuevoPedido(){
   const totalGeneral = pedidoActual.rows.reduce((s,r)=>s+(r.total||0),0);
 
   const filas = pedidoActual.rows.map((r,i)=>`
-    <tr style="border-bottom:1px solid var(--border)">
-      <td style="padding:4px 3px;color:var(--txt1);font-size:.75rem;white-space:nowrap">${r.nombre}</td>
+    <tr style="border-bottom:1px solid var(--border);${(+r.cantidad||0)>0?'background:rgba(245,158,11,0.12);border-left:3px solid var(--accent);':''}">
+      <td style="padding:4px 3px;color:${(+r.cantidad||0)>0?'var(--txt1)':'var(--txt3)'};font-size:.75rem;white-space:nowrap;font-weight:${(+r.cantidad||0)>0?'700':'400'}">${r.nombre}</td>
       <td style="padding:2px"><input type="number" value="${r.precio}"
         style="width:90px;font-size:.72rem;padding:4px"
         oninput="pedidoActual.rows[${i}].precio=this.value;pedidoActual.rows[${i}].total=(+this.value||0)*(+pedidoActual.rows[${i}].cantidad||0);actualizarTotalMay();document.getElementById('sub-${i}').textContent=pedidoActual.rows[${i}].total>0?fm(pedidoActual.rows[${i}].total):'—'"
