@@ -2415,6 +2415,7 @@ function pgMayorista(){
   const vista = window.mayVista || 'menu';
   if(vista==='clientes')   return pgMayClientes();
   if(vista==='nuevo')      return pgMayNuevoPedido();
+  if(vista==='preview')    return pgMayPreview();
   if(vista==='historial')  return pgMayHistorial();
   if(vista==='reclamos')   return pgMayReclamos();
   if(vista==='resumen')    return pgMayResumen();
@@ -2648,33 +2649,10 @@ function actualizarTotalMay(){
 
 function confirmarPedidoTabla(){
   if(!pedidoActual.clienteId){toast('⚠️ Elegí un cliente');return;}
-  const items = pedidoActual.rows.filter(r=>(+r.cantidad||0)>0||(+r.precio||0)>0);
-  if(!items.length){toast('⚠️ Cargá al menos un producto');return;}
-  const cliente = dbMay.clientes.find(c=>c.id===pedidoActual.clienteId);
-  const total = items.reduce((s,r)=>s+(r.total||0),0);
-  const pedido = {
-    id:uid(), fecha:pedidoActual.fecha||hoy(),
-    clienteId:pedidoActual.clienteId, clienteNombre:cliente.nombre,
-    items:items.map(r=>({
-      nombre:r.nombre, precio:+r.precio||0, peso:r.peso||'',
-      tipo:r.tipo, cantidad:+r.cantidad||0, desc:+r.desc||0,
-      total:r.total||0
-    })),
-    total
-  };
-  dbMay.pedidos.push(pedido);
-  saveDBMay();
-  // Generar mensaje WhatsApp
-  const msg = buildMsgPedidoTabla(pedido, cliente);
-  if(cliente.whatsapp){
-    const num='595'+cliente.whatsapp.replace(/^0/,'');
-    window.open('https://wa.me/'+num+'?text='+encodeURIComponent(msg),'_blank');
-  } else {
-    navigator.clipboard&&navigator.clipboard.writeText(msg);
-    toast('✅ Pedido copiado al portapapeles');
-  }
-  pedidoActual = {clienteId:null, items:[], fecha:hoy(), rows:null};
-  setMayVista('historial');
+  const items = pedidoActual.rows ? pedidoActual.rows.filter(r=>(+r.cantidad||0)>0) : [];
+  if(!items.length){toast('⚠️ Cargá al menos un producto con cantidad');return;}
+  // Ir a preview antes de enviar
+  setMayVista('preview');
 }
 
 function buildMsgPedidoTabla(pedido, cliente){
@@ -2772,28 +2750,498 @@ function imprimirPedido(){
   win.document.close();
 }
 
-function pgMayHistorial(){
-  const pedidos=[...dbMay.pedidos].reverse();
+function pgMayPreview(){
+  const items = pedidoActual.rows ? pedidoActual.rows.filter(r=>(+r.cantidad||0)>0) : [];
+  const cliente = dbMay.clientes.find(cl=>cl.id===pedidoActual.clienteId);
+  const total = items.reduce((s,r)=>s+(r.total||0),0);
+  const descTotal = items.reduce((s,r)=>s+(+r.desc||0)*(+r.precio||0),0);
+
+  const filas = items.map((r,i)=>`
+    <tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:5px 4px;font-size:.78rem">${r.nombre}</td>
+      <td style="padding:5px 4px;text-align:right;font-family:var(--mono);font-size:.75rem">${fm(+r.precio||0)}</td>
+      <td style="padding:5px 4px;text-align:center;font-size:.75rem">${r.cantidad} ${r.tipo}</td>
+      <td style="padding:5px 4px;text-align:center;font-size:.75rem">${r.peso||'—'}</td>
+      <td style="padding:2px">
+        <input type="number" value="${r.desc||0}" min="0"
+          style="width:55px;font-size:.72rem;padding:4px;border-color:var(--danger)"
+          oninput="pedidoActual.rows.find(x=>x.nombre==='${r.nombre}').desc=+this.value;actualizarDescPreview()"/>
+      </td>
+      <td style="padding:5px 4px;text-align:right;font-family:var(--mono);font-size:.78rem;font-weight:700;color:var(--accent)">${fm(r.total)}</td>
+    </tr>`).join('');
+
   return`
   <div class="card">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-      <div class="ct" style="margin-bottom:0">📅 HISTORIAL</div>
+      <div class="ct" style="margin-bottom:0">👁️ CONFIRMAR PEDIDO</div>
+      <button class="btn bghost bsm" onclick="setMayVista('nuevo')">← Editar</button>
+    </div>
+
+    <div style="background:var(--bg3);border-radius:10px;padding:12px;margin-bottom:14px">
+      <div class="sr"><span class="sl">Cliente</span><span class="sv">${cliente?cliente.nombre:'—'}</span></div>
+      <div class="sr"><span class="sl">Fecha</span><span class="sv">${lbl(pedidoActual.fecha||hoy())}</span></div>
+      <div class="sr"><span class="sl">Productos</span><span class="sv">${items.length}</span></div>
+    </div>
+
+    <div style="overflow-x:auto;margin-bottom:14px">
+      <table style="width:100%;border-collapse:collapse;font-family:var(--mono)">
+        <thead>
+          <tr style="background:var(--bg3);color:var(--txt2);font-size:.68rem">
+            <th style="padding:6px 4px;text-align:left">PRODUCTO</th>
+            <th style="padding:6px 4px;text-align:right">PRECIO</th>
+            <th style="padding:6px 4px;text-align:center">CANT./TIPO</th>
+            <th style="padding:6px 4px;text-align:center">PESO</th>
+            <th style="padding:6px 4px;text-align:center">DESC.</th>
+            <th style="padding:6px 4px;text-align:right">SUBTOTAL</th>
+          </tr>
+        </thead>
+        <tbody>${filas}</tbody>
+        <tfoot>
+          <tr style="background:var(--bg3)">
+            <td colspan="4" style="padding:6px 4px;font-size:.75rem;color:var(--txt3)">Descuentos</td>
+            <td colspan="2" id="prev-desc" style="padding:6px 4px;text-align:right;color:var(--danger);font-family:var(--mono)">- ${fm(descTotal)}</td>
+          </tr>
+          <tr style="background:var(--bg3)">
+            <td colspan="4" style="padding:8px 4px;font-weight:700">TOTAL NETO</td>
+            <td colspan="2" id="prev-total" style="padding:8px 4px;text-align:right;color:var(--accent);font-size:1.1rem;font-weight:800">${fm(total-descTotal)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button class="btn bg bfull" onclick="enviarPedidoFinal('wa')">📲 ENVIAR POR WHATSAPP</button>
+      <button class="btn bghost bfull" onclick="enviarPedidoFinal('print')">🖨️ PLANILLA COMPLETA (con precios)</button>
+      <button class="btn bghost bfull" onclick="enviarPedidoFinal('reparto')">📋 PLANILLA DE REPARTO (sin precios)</button>
+      <button class="btn bghost bfull" onclick="enviarPedidoFinal('copy')">📋 COPIAR AL PORTAPAPELES</button>
+    </div>
+  </div>`;
+}
+
+function actualizarDescPreview(){
+  const items = pedidoActual.rows ? pedidoActual.rows.filter(r=>(+r.cantidad||0)>0) : [];
+  const total = items.reduce((s,r)=>s+(r.total||0),0);
+  const descTotal = items.reduce((s,r)=>s+(+r.desc||0)*(+r.precio||0),0);
+  const elDesc = document.getElementById('prev-desc');
+  const elTotal = document.getElementById('prev-total');
+  if(elDesc) elDesc.textContent = '- '+fm(descTotal);
+  if(elTotal) elTotal.textContent = fm(total-descTotal);
+}
+
+function enviarPedidoFinal(accion){
+  const items = pedidoActual.rows ? pedidoActual.rows.filter(r=>(+r.cantidad||0)>0) : [];
+  const cliente = dbMay.clientes.find(cl=>cl.id===pedidoActual.clienteId);
+  const total = items.reduce((s,r)=>s+(r.total||0),0);
+  const descTotal = items.reduce((s,r)=>s+(+r.desc||0)*(+r.precio||0),0);
+
+  // Guardar pedido
+  const pedido = {
+    id:uid(), fecha:pedidoActual.fecha||hoy(),
+    clienteId:pedidoActual.clienteId,
+    clienteNombre:cliente?cliente.nombre:'',
+    items:items.map(r=>({
+      nombre:r.nombre, precio:+r.precio||0, peso:r.peso||'',
+      tipo:r.tipo, cantidad:+r.cantidad||0, desc:+r.desc||0,
+      total:r.total||0
+    })),
+    total, descTotal, neto:total-descTotal
+  };
+  dbMay.pedidos.push(pedido);
+  saveDBMay();
+
+  if(accion==='print'){
+    imprimirPedidoFinal(pedido, cliente);
+  } else if(accion==='reparto'){
+    imprimirPedidoReparto(pedido, cliente);
+  } else {
+    const msg = buildMsgPedidoTabla(pedido, cliente);
+    if(accion==='wa' && cliente && cliente.whatsapp){
+      const num='595'+cliente.whatsapp.replace(/^0/,'');
+      window.open('https://wa.me/'+num+'?text='+encodeURIComponent(msg),'_blank');
+    } else {
+      navigator.clipboard&&navigator.clipboard.writeText(msg);
+      toast('✅ Copiado al portapapeles');
+    }
+  }
+
+  pedidoActual = {clienteId:null,items:[],fecha:hoy(),rows:null};
+  setMayVista('historial');
+}
+
+function imprimirPedidoFinal(pedido, cliente){
+  if(!pedido){toast('⚠️ Pedido no encontrado');return;}
+  const win = window.open('','_blank');
+  const rows = pedido.items.map(r=>
+    `<tr>
+      <td>${r.nombre}</td>
+      <td style="text-align:right">${fm(r.precio||0)}</td>
+      <td style="text-align:center">${r.cantidad}</td>
+      <td style="text-align:center">${r.tipo}</td>
+      <td style="text-align:center">${r.peso||'—'}</td>
+      <td style="text-align:center">${r.desc||0}</td>
+      <td style="text-align:right;font-weight:bold">${fm(r.total||0)}</td>
+    </tr>`
+  ).join('');
+
+  // Descuentos post-entrega
+  const descRows = (pedido.descuentos||[]).map(d=>
+    `<tr style="color:#c00">
+      <td colspan="5">${d.producto} — ${d.motivo}</td>
+      <td></td>
+      <td style="text-align:right">- ${fm(d.monto)}</td>
+    </tr>`
+  ).join('');
+
+  const totalDesc = (pedido.descuentos||[]).reduce((s,d)=>s+d.monto,0);
+  const netoFinal = pedido.netoFinal!==undefined ? pedido.netoFinal : (pedido.neto||pedido.total);
+
+  win.document.write(`<!DOCTYPE html><html><head>
+  <title>Pedido ${cliente?cliente.nombre:''} — ${pedido.fecha}</title>
+  <meta charset="UTF-8"/>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Arial,sans-serif;padding:16px;font-size:12px;color:#111}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;border-bottom:2px solid #111;padding-bottom:10px}
+    .titulo{font-size:18px;font-weight:bold}
+    .subtitulo{font-size:13px;color:#444;margin-top:2px}
+    .info{text-align:right;font-size:12px;color:#444}
+    table{width:100%;border-collapse:collapse;margin-top:10px}
+    thead tr{background:#222;color:#fff}
+    th{padding:7px 8px;text-align:left;font-size:11px;letter-spacing:.5px}
+    td{padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px}
+    tbody tr:nth-child(even){background:#f9f9f9}
+    .subtotal{font-weight:bold;text-align:right}
+    .desc-row td{color:#c00;background:#fff5f5}
+    .total-row td{background:#222;color:#fff;font-weight:bold;font-size:14px;padding:8px}
+    .neto-row td{background:#f0f0f0;font-weight:bold;font-size:13px;padding:8px}
+    .firma{margin-top:30px;display:flex;justify-content:space-between}
+    .firma-box{border-top:1px solid #999;width:40%;text-align:center;padding-top:6px;font-size:11px;color:#666}
+    .queja-box{margin-top:20px;border:1px dashed #c00;padding:10px;border-radius:4px}
+    .queja-title{color:#c00;font-weight:bold;font-size:11px;margin-bottom:6px}
+    .queja-row{display:flex;justify-content:space-between;font-size:11px;padding:3px 0;border-bottom:1px solid #fcc}
+    @media print{
+      button{display:none!important}
+      body{padding:8px}
+    }
+    .print-btn{background:#222;color:#fff;border:none;padding:10px 20px;cursor:pointer;font-size:13px;border-radius:4px;margin-bottom:14px}
+  </style>
+  </head><body>
+
+  <button class="print-btn" onclick="window.print()">🖨️ IMPRIMIR</button>
+
+  <div class="header">
+    <div>
+      <div class="titulo">📦 PEDIDO MAYORISTA</div>
+      <div class="subtitulo">Cliente: <strong>${cliente?cliente.nombre:'—'}</strong></div>
+      <div class="subtitulo">Fecha: ${lbl(pedido.fecha)}</div>
+    </div>
+    <div class="info">
+      <div>Productos: ${pedido.items.length}</div>
+      <div>Generado: ${new Date().toLocaleString('es-PY')}</div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>PRODUCTO</th>
+        <th style="text-align:right">PRECIO Gs.</th>
+        <th style="text-align:center">CANT.</th>
+        <th style="text-align:center">TIPO</th>
+        <th style="text-align:center">PESO kg</th>
+        <th style="text-align:center">DESC.</th>
+        <th style="text-align:right">SUBTOTAL Gs.</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows}
+    </tbody>
+    <tfoot>
+      ${pedido.descTotal||0 > 0 ? `<tr><td colspan="6" style="text-align:right;color:#c00">Descuentos en pedido</td><td style="text-align:right;color:#c00">- ${fm(pedido.descTotal||0)}</td></tr>` : ''}
+      <tr class="neto-row">
+        <td colspan="6">TOTAL PEDIDO</td>
+        <td style="text-align:right">${fm(pedido.neto||pedido.total)}</td>
+      </tr>
+    </tfoot>
+  </table>
+
+  ${(pedido.descuentos||[]).length > 0 ? `
+  <div class="queja-box">
+    <div class="queja-title">⚠️ DESCUENTOS POR QUEJA / DAÑOS POST-ENTREGA</div>
+    ${(pedido.descuentos||[]).map(d=>`
+      <div class="queja-row">
+        <span>${d.producto} — ${d.motivo}</span>
+        <span style="color:#c00;font-weight:bold">- ${fm(d.monto)}</span>
+      </div>`).join('')}
+    <div style="text-align:right;font-weight:bold;margin-top:8px;color:#c00">
+      Total descuentos: - ${fm(totalDesc)}
+    </div>
+  </div>
+  <table style="margin-top:8px">
+    <tfoot>
+      <tr class="total-row">
+        <td colspan="6">TOTAL NETO A COBRAR</td>
+        <td style="text-align:right">${fm(netoFinal)}</td>
+      </tr>
+    </tfoot>
+  </table>` : ''}
+
+  <div class="firma">
+    <div class="firma-box">Entregado por</div>
+    <div class="firma-box">Recibido por — ${cliente?cliente.nombre:''}</div>
+  </div>
+
+  </body></html>`);
+  win.document.close();
+}
+
+function pgMayHistorial(){
+  const fechaFiltro = window.mayHistFecha || '';
+  const pedidos = [...dbMay.pedidos]
+    .filter(p => !fechaFiltro || p.fecha === fechaFiltro)
+    .reverse();
+
+  const detalle = window.mayHistDetalle;
+
+  // Vista detalle de un pedido
+  if(detalle){
+    const p = dbMay.pedidos.find(x=>x.id===detalle);
+    if(p){
+      const filas = p.items.map(r=>`
+        <tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:4px;font-size:.75rem">${r.nombre}</td>
+          <td style="padding:4px;text-align:right;font-family:var(--mono);font-size:.72rem">${fm(r.precio||0)}</td>
+          <td style="padding:4px;text-align:center;font-size:.72rem">${r.cantidad} ${r.tipo}</td>
+          <td style="padding:4px;text-align:center;font-size:.72rem">${r.peso||'—'}</td>
+          <td style="padding:4px;text-align:center;font-size:.72rem;color:var(--danger)">${r.desc||0}</td>
+          <td style="padding:4px;text-align:right;font-family:var(--mono);font-size:.75rem;color:var(--accent)">${fm(r.total||0)}</td>
+        </tr>`).join('');
+      return`
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <div class="ct" style="margin-bottom:0">📋 ${p.clienteNombre} — ${lbl(p.fecha)}</div>
+          <button class="btn bghost bsm" onclick="window.mayHistDetalle=null;render()">← Volver</button>
+        </div>
+        <div style="overflow-x:auto;margin-bottom:12px">
+          <table style="width:100%;border-collapse:collapse;font-family:var(--mono)">
+            <thead><tr style="background:var(--bg3);color:var(--txt2);font-size:.68rem">
+              <th style="padding:5px 4px;text-align:left">PRODUCTO</th>
+              <th style="padding:5px 4px;text-align:right">PRECIO</th>
+              <th style="padding:5px 4px;text-align:center">CANT.</th>
+              <th style="padding:5px 4px;text-align:center">PESO</th>
+              <th style="padding:5px 4px;text-align:center">DESC.</th>
+              <th style="padding:5px 4px;text-align:right">SUBTOTAL</th>
+            </tr></thead>
+            <tbody>${filas}</tbody>
+            <tfoot>
+              ${p.descTotal?`<tr style="background:var(--bg3)"><td colspan="5" style="padding:6px 4px;color:var(--danger)">Descuentos</td><td style="padding:6px 4px;text-align:right;color:var(--danger)">- ${fm(p.descTotal)}</td></tr>`:''}
+              <tr style="background:var(--bg3)"><td colspan="5" style="padding:8px 4px;font-weight:700">TOTAL NETO</td>
+              <td style="padding:8px 4px;text-align:right;color:var(--accent);font-size:1.1rem;font-weight:800">${fm(p.netoFinal!==undefined?p.netoFinal:(p.neto||p.total))}</td></tr>
+            </tfoot>
+          </table>
+        </div>
+        <!-- Agregar descuento post-pedido -->
+        <div style="background:var(--bg3);border-radius:10px;padding:12px;margin-bottom:10px">
+          <div style="font-family:var(--mono);font-size:.68rem;color:var(--warn);font-weight:700;margin-bottom:8px">⚠️ AGREGAR DESCUENTO POR QUEJA</div>
+          <div class="g2" style="margin-bottom:8px">
+            <div><label>PRODUCTO</label>
+              <input id="desc-prod-${p.id}" list="desc-prod-list" placeholder="Ej: Tomate"/>
+              <datalist id="desc-prod-list">
+                ${p.items.map(r=>`<option value="${r.nombre}">`).join('')}
+              </datalist>
+            </div>
+            <div><label>MONTO Gs.</label>
+              <input id="desc-monto-${p.id}" type="number" placeholder="50000"/>
+            </div>
+          </div>
+          <div style="margin-bottom:8px">
+            <label>MOTIVO</label>
+            <input id="desc-motivo-${p.id}" placeholder="Podrido, dañado, faltante..."/>
+          </div>
+          <button class="btn bred bfull" onclick="agregarDescuentoPedido('${p.id}')">➖ APLICAR DESCUENTO</button>
+          ${p.descuentos&&p.descuentos.length?`
+          <div style="margin-top:10px">
+            <div style="font-family:var(--mono);font-size:.67rem;color:var(--txt3);margin-bottom:6px">DESCUENTOS APLICADOS</div>
+            ${p.descuentos.map((d,di)=>`
+              <div class="sr">
+                <div><div style="font-size:.78rem">${d.producto}</div>
+                  <div style="font-size:.67rem;color:var(--txt3)">${d.motivo}</div></div>
+                <div style="display:flex;align-items:center;gap:6px">
+                  <span style="color:var(--danger);font-family:var(--mono);font-size:.78rem">- ${fm(d.monto)}</span>
+                  <button class="btn bred bsm" onclick="quitarDescuentoPedido('${p.id}',${di})">✕</button>
+                </div>
+              </div>`).join('')}
+          </div>`:''}
+        </div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn bblue bfull" onclick="reenviarPedido('${p.id}')">📲 Reenviar WhatsApp</button>
+          <button class="btn bghost bfull" onclick="imprimirPedidoFinal(dbMay.pedidos.find(x=>x.id==='${p.id}'),dbMay.clientes.find(c=>c.id==='${p.clienteId}'))">🖨️ Planilla completa</button>
+          <button class="btn bghost bfull" onclick="imprimirPedidoReparto(dbMay.pedidos.find(x=>x.id==='${p.id}'),dbMay.clientes.find(c=>c.id==='${p.clienteId}'))">📋 Planilla de reparto</button>
+          <button class="btn bred bsm" onclick="eliminarPedidoMay('${p.id}')">🗑️</button>
+        </div>
+      </div>`;
+    }
+  }
+
+  return`
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div class="ct" style="margin-bottom:0">📅 HISTORIAL DE PEDIDOS</div>
       <button class="btn bghost bsm" onclick="setMayVista('menu')">← Volver</button>
     </div>
-    <input type="date" id="hist-fecha" style="margin-bottom:10px"/>
-    ${!pedidos.length?'<div class="empty"><div class="ico">📋</div>Sin pedidos</div>':
-      pedidos.map(p=>{
-        const recl=dbMay.reclamos.filter(r=>r.pedidoId===p.id).reduce((s,r)=>s+r.monto,0);
-        return`<div class="li">
-          <div class="lim"><div class="lin">${p.clienteNombre}</div>
-            <div class="lis">${lbl(p.fecha)} · ${p.items.length} productos</div></div>
-          <div style="text-align:right">
-            <div class="lia">${fm(p.total)}</div>
-            ${recl?`<div style="font-family:var(--mono);font-size:.67rem;color:var(--danger)">- ${fm(recl)}</div>`:''}
+    <input type="date" id="hist-fecha" value="${fechaFiltro}"
+      style="margin-bottom:10px"
+      oninput="window.mayHistFecha=this.value;render()"/>
+    ${fechaFiltro?`<button class="btn bghost bsm" style="margin-bottom:10px" onclick="window.mayHistFecha='';render()">✕ Ver todos</button>`:''}
+    ${!pedidos.length?'<div class="empty"><div class="ico">📋</div>Sin pedidos para esa fecha</div>':
+      pedidos.map(p=>`
+        <div class="li" style="cursor:pointer" onclick="window.mayHistDetalle='${p.id}';render()">
+          <div class="lim">
+            <div class="lin">${p.clienteNombre}</div>
+            <div class="lis">${lbl(p.fecha)} · ${p.items.length} productos</div>
           </div>
-        </div>`;
-      }).join('')}
+          <div style="text-align:right">
+            <div class="lia">${fm(p.neto||p.total)}</div>
+            ${p.descTotal?`<div style="font-family:var(--mono);font-size:.67rem;color:var(--danger)">-${fm(p.descTotal)} desc.</div>`:''}
+          </div>
+        </div>`).join('')}
   </div>`;
+}
+
+function imprimirPedidoReparto(pedido, cliente){
+  if(!pedido){toast('⚠️ Pedido no encontrado');return;}
+  const win = window.open('','_blank');
+  const rows = pedido.items.map(r=>
+    `<tr>
+      <td>${r.nombre}</td>
+      <td style="text-align:center;font-size:14px;font-weight:bold">${r.cantidad}</td>
+      <td style="text-align:center">${r.tipo}</td>
+      <td style="text-align:center">${r.peso||'—'}</td>
+      <td style="text-align:center;color:#c00">${r.desc||''}</td>
+      <td style="width:80px;border-bottom:1px solid #999"></td>
+    </tr>`
+  ).join('');
+
+  win.document.write(`<!DOCTYPE html><html><head>
+  <title>Reparto — ${cliente?cliente.nombre:''}</title>
+  <meta charset="UTF-8"/>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Arial,sans-serif;padding:16px;font-size:13px;color:#111}
+    .header{border-bottom:3px solid #111;padding-bottom:10px;margin-bottom:14px}
+    .titulo{font-size:20px;font-weight:bold;text-transform:uppercase}
+    .cliente{font-size:16px;margin-top:4px;color:#333}
+    .fecha{font-size:13px;color:#666;margin-top:2px}
+    table{width:100%;border-collapse:collapse;margin-top:10px}
+    thead tr{background:#111;color:#fff}
+    th{padding:8px;text-align:left;font-size:12px;letter-spacing:.5px}
+    td{padding:8px;border-bottom:1px solid #ddd;font-size:13px}
+    tbody tr:nth-child(even){background:#f5f5f5}
+    .total-row td{background:#eee;font-weight:bold;font-size:14px;padding:10px}
+    .nota{margin-top:20px;border:1px solid #ccc;padding:10px;border-radius:4px;font-size:12px;color:#666}
+    .firma{margin-top:30px;display:flex;justify-content:space-between}
+    .firma-box{border-top:2px solid #111;width:45%;text-align:center;padding-top:8px;font-size:12px}
+    @media print{
+      button{display:none!important}
+      body{padding:8px}
+    }
+    .print-btn{background:#111;color:#fff;border:none;padding:10px 20px;cursor:pointer;font-size:13px;border-radius:4px;margin-bottom:14px}
+  </style>
+  </head><body>
+
+  <button class="print-btn" onclick="window.print()">🖨️ IMPRIMIR</button>
+
+  <div class="header">
+    <div class="titulo">🚚 PLANILLA DE REPARTO</div>
+    <div class="cliente">Cliente: <strong>${cliente?cliente.nombre:'—'}</strong></div>
+    <div class="fecha">Fecha: ${lbl(pedido.fecha)} &nbsp;|&nbsp; Total productos: ${pedido.items.length}</div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>PRODUCTO</th>
+        <th style="text-align:center">CANTIDAD</th>
+        <th style="text-align:center">TIPO</th>
+        <th style="text-align:center">PESO kg</th>
+        <th style="text-align:center">DESC.</th>
+        <th style="text-align:center">✓ ENTREGADO</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+    <tfoot>
+      <tr class="total-row">
+        <td>TOTAL</td>
+        <td style="text-align:center">${pedido.items.reduce((s,r)=>s+(+r.cantidad||0),0)}</td>
+        <td colspan="4"></td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <div class="nota">
+    <strong>Notas:</strong><br><br><br>
+  </div>
+
+  <div class="firma">
+    <div class="firma-box">Despachado por</div>
+    <div class="firma-box">Recibido por — ${cliente?cliente.nombre:''}</div>
+  </div>
+
+  </body></html>`);
+  win.document.close();
+}
+
+function agregarDescuentoPedido(pedidoId){
+  const prod  = document.getElementById('desc-prod-'+pedidoId).value.trim();
+  const monto = +document.getElementById('desc-monto-'+pedidoId).value||0;
+  const motivo= document.getElementById('desc-motivo-'+pedidoId).value.trim()||'dañado';
+  if(!prod){toast('⚠️ Ingresá el producto');return;}
+  if(!monto){toast('⚠️ Ingresá el monto');return;}
+  const p = dbMay.pedidos.find(x=>x.id===pedidoId);
+  if(!p) return;
+  if(!p.descuentos) p.descuentos = [];
+  p.descuentos.push({producto:prod, monto, motivo, fecha:hoy()});
+  // Recalcular neto
+  const totalDesc = p.descuentos.reduce((s,d)=>s+d.monto,0);
+  p.netoFinal = p.total - totalDesc;
+  saveDBMay();
+  toast('✅ Descuento de '+fm(monto)+' aplicado');
+  render();
+}
+
+function quitarDescuentoPedido(pedidoId, idx){
+  if(!confirm('¿Quitar este descuento?'))return;
+  const p = dbMay.pedidos.find(x=>x.id===pedidoId);
+  if(!p||!p.descuentos) return;
+  p.descuentos.splice(idx,1);
+  const totalDesc = p.descuentos.reduce((s,d)=>s+d.monto,0);
+  p.netoFinal = p.total - totalDesc;
+  saveDBMay();
+  render();
+  toast('🗑️ Descuento eliminado');
+}
+
+function reenviarPedido(id){
+  const p = dbMay.pedidos.find(x=>x.id===id);
+  const cliente = dbMay.clientes.find(c=>c.id===p.clienteId);
+  const msg = buildMsgPedidoTabla(p, cliente);
+  if(cliente && cliente.whatsapp){
+    const num='595'+cliente.whatsapp.replace(/^0/,'');
+    window.open('https://wa.me/'+num+'?text='+encodeURIComponent(msg),'_blank');
+  } else {
+    navigator.clipboard&&navigator.clipboard.writeText(msg);
+    toast('✅ Copiado al portapapeles');
+  }
+}
+
+function eliminarPedidoMay(id){
+  if(!confirm('¿Eliminar este pedido?'))return;
+  dbMay.pedidos = dbMay.pedidos.filter(p=>p.id!==id);
+  saveDBMay();
+  window.mayHistDetalle = null;
+  render();
+  toast('🗑️ Pedido eliminado');
 }
 
 function pgMayReclamos(){
