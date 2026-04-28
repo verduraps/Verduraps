@@ -196,6 +196,22 @@
 
 <div id="toasts"></div>
 
+<!-- MODAL CARTELES DE IMPRESIÓN -->
+<div id="m-carteles" class="ov" style="display:none" onclick="cerrarModalCarteles(event)">
+  <div class="modal" style="max-width:520px;max-height:90vh;overflow-y:auto">
+    <div class="mt">🖨️ CARTELES DE PRECIOS</div>
+    <p style="font-family:var(--mono);font-size:.72rem;color:var(--txt3);margin-bottom:14px;line-height:1.7">
+      Editá precio, unidad o quitá productos antes de imprimir.
+    </p>
+    <div id="carteles-lista"></div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn bg bfull" onclick="enviarImprimir()">🖨️ IMPRIMIR</button>
+      <button class="btn bghost" onclick="cerrarModalCarteles()">✕</button>
+    </div>
+    <div id="carteles-status" style="margin-top:10px;font-family:var(--mono);font-size:.75rem;text-align:center"></div>
+  </div>
+</div>
+
 <script>
 /* ═══════════════════════════════════════════════════════
    PRODUCTOS DEFAULT (de tu products.json)
@@ -716,6 +732,17 @@ function pgPesos(){
       <button class="btn bghost bsm" onclick="resetPesos()">🔄 RESETEAR PESOS</button>
       <button class="btn bghost bsm" onclick="agregarFilaPeso()">+ FILA</button>
     </div>
+  </div>
+
+  <!-- IMPRIMIR CARTELES -->
+  <div class="card" style="border-color:#4ade80">
+    <div class="ct" style="color:#4ade80">🖨️ IMPRIMIR CARTELES DE PRECIOS</div>
+    <p style="font-family:var(--mono);font-size:.72rem;color:var(--txt3);margin-bottom:12px;line-height:1.7">
+      Revisá y editá los precios antes de imprimir. 2 carteles por hoja A4.
+    </p>
+    <button class="btn bfull" style="background:#4ade80;color:#111;font-weight:700" onclick="abrirModalCarteles()">
+      🖨️ PREPARAR CARTELES
+    </button>
   </div>
 
   <!-- Vista previa y WhatsApp -->
@@ -3392,6 +3419,114 @@ setInterval(updateHeader,60000);
 // Verificar alertas de variación de precio al iniciar
 setTimeout(checkAlertasPrecios, 1000);
 // SW registrado abajo
+
+/* ═══════════════════════════════════════════════════════
+   IMPRESIÓN DE CARTELES
+═══════════════════════════════════════════════════════ */
+
+// IP del servidor de impresión en la PC
+const PRINT_SERVER = 'http://192.168.18.125:3456';
+
+// Productos que se venden por unidad (c/u)
+const PRODUCTOS_POR_UNIDAD = [
+  'mamon brasil grande','mamon brasil chico',
+  'manzana roja grande','manzana roja',
+  'manzana verde','pera','pina grande','piña grande'
+];
+
+function esPorUnidad(nombre) {
+  const n = normalizarTexto(nombre);
+  return PRODUCTOS_POR_UNIDAD.some(p => n.includes(p) || p.includes(n));
+}
+
+// Estado temporal de carteles editables
+let cartelesData = [];
+
+function abrirModalCarteles() {
+  // Tomar solo productos con precio de venta
+  cartelesData = pesoRows
+    .filter(r => r.producto && r.precioVenta)
+    .sort((a, b) => a.producto.localeCompare(b.producto, 'es'))
+    .map(r => ({
+      producto: r.producto,
+      precio: r.precioVenta,
+      porUnidad: esPorUnidad(r.producto),
+      incluir: true
+    }));
+
+  if (!cartelesData.length) {
+    toast('⚠️ No hay productos con precio de venta');
+    return;
+  }
+
+  renderCartelesLista();
+  document.getElementById('m-carteles').style.display = 'flex';
+  document.getElementById('carteles-status').textContent = '';
+}
+
+function renderCartelesLista() {
+  const lista = document.getElementById('carteles-lista');
+  lista.innerHTML = cartelesData.map((c, i) => `
+    <div style="background:var(--bg2);border:1px solid ${c.incluir ? 'var(--accent)' : 'var(--border)'};border-radius:10px;padding:10px 12px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <input type="checkbox" id="inc-${i}" ${c.incluir ? 'checked' : ''}
+          onchange="cartelesData[${i}].incluir=this.checked;renderCartelesLista()"
+          style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer"/>
+        <span style="font-weight:700;font-size:.9rem;flex:1">${c.producto}</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <div style="flex:1">
+          <label style="font-size:.63rem">PRECIO Gs.</label>
+          <input type="number" value="${c.precio}" step="100"
+            onchange="cartelesData[${i}].precio=+this.value"
+            style="padding:7px 10px;font-size:.88rem;text-align:right"/>
+        </div>
+        <div style="width:90px">
+          <label style="font-size:.63rem">UNIDAD</label>
+          <select onchange="cartelesData[${i}].porUnidad=this.value==='cu'"
+            style="padding:7px 8px;font-size:.85rem">
+            <option value="k" ${!c.porUnidad ? 'selected' : ''}>/k</option>
+            <option value="cu" ${c.porUnidad ? 'selected' : ''}>c/u</option>
+          </select>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function cerrarModalCarteles(e) {
+  if (e && e.target !== document.getElementById('m-carteles')) return;
+  document.getElementById('m-carteles').style.display = 'none';
+}
+
+async function enviarImprimir() {
+  const productos = cartelesData.filter(c => c.incluir);
+  if (!productos.length) { toast('⚠️ Seleccioná al menos un producto'); return; }
+
+  const status = document.getElementById('carteles-status');
+  status.style.color = 'var(--txt2)';
+  status.textContent = '⏳ Enviando a la impresora...';
+
+  try {
+    const res = await fetch(`${PRINT_SERVER}/imprimir`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ productos })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      status.style.color = '#4ade80';
+      status.textContent = '✅ ' + data.mensaje;
+      toast('✅ Carteles enviados a imprimir');
+      setTimeout(() => cerrarModalCarteles(), 2000);
+    } else {
+      status.style.color = 'var(--danger)';
+      status.textContent = '❌ Error: ' + (data.error || 'sin respuesta');
+    }
+  } catch (e) {
+    status.style.color = 'var(--danger)';
+    status.textContent = '❌ No se pudo conectar con la PC. ¿El servidor está activo?';
+  }
+}
 </script>
 
 <script>
