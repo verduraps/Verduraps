@@ -3435,7 +3435,9 @@ const PRODUCTOS_POR_UNIDAD = [
 ];
 
 function esPorUnidad(nombre) {
-  const n = normalizarTexto(nombre);
+  const n = nombre.toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .trim();
   return PRODUCTOS_POR_UNIDAD.some(p => n.includes(p) || p.includes(n));
 }
 
