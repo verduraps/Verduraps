@@ -194,16 +194,18 @@
   </div>
 </div>
 
-<div id="m-carteles" class="ov" style="display:none" onclick="cerrarModalCarteles(event)">
+<!-- MODAL CARTELES -->
+<div id="m-carteles" class="ov" style="display:none" onclick="if(event.target===this)this.style.display='none'">
   <div class="modal" style="max-width:520px;max-height:90vh;overflow-y:auto">
     <div class="mt">🖨️ CARTELES DE PRECIOS</div>
-    <p style="font-family:var(--mono);font-size:.72rem;color:var(--txt3);margin-bottom:14px;line-height:1.7">Editá precio, unidad o quitá productos antes de imprimir.</p>
+    <p style="font-family:var(--mono);font-size:.72rem;color:var(--txt3);margin-bottom:14px;line-height:1.7">
+      Editá precio o unidad antes de imprimir. 2 carteles por hoja A4.
+    </p>
     <div id="carteles-lista"></div>
     <div style="display:flex;gap:8px;margin-top:16px">
-      <button class="btn bg bfull" onclick="enviarImprimir()">🖨️ IMPRIMIR</button>
+      <button class="btn bg bfull" onclick="imprimirCarteles()">🖨️ IMPRIMIR</button>
       <button class="btn bghost" onclick="document.getElementById('m-carteles').style.display='none'">✕</button>
     </div>
-    <div id="carteles-status" style="margin-top:10px;font-family:var(--mono);font-size:.75rem;text-align:center"></div>
   </div>
 </div>
 
@@ -735,9 +737,12 @@ function pgPesos(){
   <!-- IMPRIMIR CARTELES -->
   <div class="card" style="border-color:#4ade80">
     <div class="ct" style="color:#4ade80">🖨️ IMPRIMIR CARTELES DE PRECIOS</div>
-    <p style="font-family:var(--mono);font-size:.72rem;color:var(--txt3);margin-bottom:12px;line-height:1.7">Revisá y editá los precios antes de imprimir. 2 carteles por hoja A4.</p>
-    <button class="btn bfull" style="background:#4ade80;color:#111;font-weight:700" onclick="abrirModalCarteles()">🖨️ PREPARAR CARTELES</button>
+    <p style="font-family:var(--mono);font-size:.72rem;color:var(--txt3);margin-bottom:12px;line-height:1.7">
+      Revisá y editá los precios antes de imprimir. 2 carteles por hoja A4.
+    </p>
+    <button class="btn bfull" style="background:#4ade80;color:#111;font-weight:700" onclick="abrirCarteles()">🖨️ PREPARAR CARTELES</button>
   </div>
+
   <!-- Vista previa y WhatsApp -->
   <div class="card">
     <div class="ct">📲 ENVIAR POR WHATSAPP</div>
@@ -3414,98 +3419,105 @@ setTimeout(checkAlertasPrecios, 1000);
 // SW registrado abajo
 
 /* ═══════════════════════════════════════════════════════
-   IMPRESIÓN DE CARTELES
+   IMPRESIÓN DE CARTELES — ventana directa del navegador
 ═══════════════════════════════════════════════════════ */
-const PRINT_SERVER = 'http://192.168.18.125:3456';
-const PRODUCTOS_POR_UNIDAD = [
-  'mamon brasil grande','mamon brasil chico',
-  'manzana roja grande','manzana roja',
-  'manzana verde','pera','pina grande','piña grande','pina'
-];
 
-function esPorUnidad(nombre) {
+const PRODUCTOS_CU = ['mamon brasil grande','mamon brasil chico','manzana roja grande',
+  'manzana roja','manzana verde','pera','pina grande','piña grande','pina'];
+
+function _esCU(nombre) {
   const n = nombre.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
-  return PRODUCTOS_POR_UNIDAD.some(p => n.includes(p) || p.includes(n));
+  return PRODUCTOS_CU.some(p => n.includes(p) || p.includes(n));
 }
 
-let cartelesData = [];
+let _carteles = [];
 
-function abrirModalCarteles() {
-  cartelesData = pesoRows
+function abrirCarteles() {
+  _carteles = pesoRows
     .filter(r => r.producto && r.precioVenta)
-    .sort((a, b) => a.producto.localeCompare(b.producto, 'es'))
+    .sort((a,b) => a.producto.localeCompare(b.producto,'es'))
     .map(r => ({
       producto: r.producto,
       precio: r.precioVenta,
-      porUnidad: esPorUnidad(r.producto),
-      incluir: true
+      cu: _esCU(r.producto),
+      ok: true
     }));
-  if (!cartelesData.length) { toast('⚠️ No hay productos con precio de venta'); return; }
-  renderCartelesLista();
+
+  if (!_carteles.length) {
+    toast('⚠️ No hay productos con precio de venta');
+    return;
+  }
+
+  _renderCarteles();
   document.getElementById('m-carteles').style.display = 'flex';
-  document.getElementById('carteles-status').textContent = '';
 }
 
-function renderCartelesLista() {
-  const lista = document.getElementById('carteles-lista');
-  lista.innerHTML = cartelesData.map((c, i) => `
-    <div style="background:var(--bg2);border:1px solid ${c.incluir ? 'var(--accent)' : 'var(--border)'};border-radius:10px;padding:10px 12px;margin-bottom:8px">
+function _renderCarteles() {
+  document.getElementById('carteles-lista').innerHTML = _carteles.map((c,i) => `
+    <div style="background:var(--bg2);border:1px solid ${c.ok?'var(--accent)':'var(--border)'};border-radius:10px;padding:10px 12px;margin-bottom:8px">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-        <input type="checkbox" ${c.incluir ? 'checked' : ''}
-          onchange="cartelesData[${i}].incluir=this.checked;renderCartelesLista()"
+        <input type="checkbox" ${c.ok?'checked':''} onchange="_carteles[${i}].ok=this.checked;_renderCarteles()"
           style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer"/>
         <span style="font-weight:700;font-size:.9rem;flex:1">${c.producto}</span>
       </div>
-      <div style="display:flex;gap:8px;align-items:center">
+      <div style="display:flex;gap:8px">
         <div style="flex:1">
           <label style="font-size:.63rem">PRECIO Gs.</label>
           <input type="number" value="${c.precio}" step="100"
-            onchange="cartelesData[${i}].precio=+this.value"
+            onchange="_carteles[${i}].precio=+this.value"
             style="padding:7px 10px;font-size:.88rem;text-align:right"/>
         </div>
         <div style="width:90px">
           <label style="font-size:.63rem">UNIDAD</label>
-          <select onchange="cartelesData[${i}].porUnidad=this.value==='cu'"
-            style="padding:7px 8px;font-size:.85rem">
-            <option value="k" ${!c.porUnidad ? 'selected' : ''}>/k</option>
-            <option value="cu" ${c.porUnidad ? 'selected' : ''}>c/u</option>
+          <select onchange="_carteles[${i}].cu=this.value==='cu'" style="padding:7px 8px;font-size:.85rem">
+            <option value="k" ${!c.cu?'selected':''}>/k</option>
+            <option value="cu" ${c.cu?'selected':''}>c/u</option>
           </select>
         </div>
       </div>
     </div>`).join('');
 }
 
-function cerrarModalCarteles(e) {
-  if (e && e.target !== document.getElementById('m-carteles')) return;
-  document.getElementById('m-carteles').style.display = 'none';
-}
+function imprimirCarteles() {
+  const lista = _carteles.filter(c => c.ok);
+  if (!lista.length) { toast('⚠️ Seleccioná al menos un producto'); return; }
 
-async function enviarImprimir() {
-  const productos = cartelesData.filter(c => c.incluir);
-  if (!productos.length) { toast('⚠️ Seleccioná al menos un producto'); return; }
-  const status = document.getElementById('carteles-status');
-  status.style.color = 'var(--txt2)';
-  status.textContent = '⏳ Enviando a la impresora...';
-  try {
-    const res = await fetch(`${PRINT_SERVER}/imprimir`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ productos })
-    });
-    const data = await res.json();
-    if (data.ok) {
-      status.style.color = '#4ade80';
-      status.textContent = '✅ ' + data.mensaje;
-      toast('✅ Carteles enviados a imprimir');
-      setTimeout(() => cerrarModalCarteles(), 2000);
-    } else {
-      status.style.color = 'var(--danger)';
-      status.textContent = '❌ ' + (data.error || 'sin respuesta');
-    }
-  } catch(e) {
-    status.style.color = 'var(--danger)';
-    status.textContent = '❌ No se pudo conectar con la PC. ¿El servidor está activo?';
-  }
+  const pares = [];
+  for (let i = 0; i < lista.length; i += 2) pares.push([lista[i], lista[i+1]||null]);
+
+  const cartelHTML = p => {
+    if (!p) return '<div class="cartel vacio"></div>';
+    const unidad = p.cu ? 'c/u' : '/k';
+    const precio = Number(p.precio).toLocaleString('es-PY');
+    const fs = p.producto.length > 18 ? '52pt' : p.producto.length > 12 ? '64pt' : '76pt';
+    return `<div class="cartel">
+      <div class="nombre" style="font-size:${fs}">${p.producto.toUpperCase()}</div>
+      <div class="precio">Gs. ${precio} <span class="unidad">${unidad}</span></div>
+    </div>`;
+  };
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
+  <title>Carteles</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:Arial Black,Arial,sans-serif;background:#fff}
+    .pagina{width:210mm;height:297mm;display:flex;flex-direction:column;page-break-after:always}
+    .cartel{width:100%;height:148.5mm;display:flex;flex-direction:column;align-items:center;justify-content:center;border:3px solid #000;padding:15mm;gap:12mm}
+    .cartel.vacio{border:3px dashed #ccc}
+    .nombre{font-weight:900;color:#000;text-align:center;line-height:1.1}
+    .precio{font-size:60pt;font-weight:900;color:#000;text-align:center}
+    .unidad{font-size:38pt;font-weight:700}
+    @media print{body{margin:0}.pagina{page-break-after:always}}
+  </style></head><body>
+  ${pares.map(([a,b])=>`<div class="pagina">${cartelHTML(a)}${cartelHTML(b)}</div>`).join('')}
+  <script>window.onload=()=>{window.print()}<\/script>
+  </body></html>`;
+
+  const win = window.open('','_blank');
+  if (!win) { toast('⚠️ Permitir ventanas emergentes en Chrome'); return; }
+  win.document.write(html);
+  win.document.close();
+  document.getElementById('m-carteles').style.display = 'none';
 }
 
 </script>
