@@ -3478,10 +3478,9 @@ function _renderCarteles() {
     </div>`).join('');
 }
 
-function imprimirCarteles() {
-  const lista = _carteles.filter(c => c.ok);
-  if (!lista.length) { toast('⚠️ Seleccioná al menos un producto'); return; }
+const PRINT_SERVER_URL = 'http://192.168.18.125:3456/imprimir';
 
+function _imprimirCartelesNavegador(lista) {
   const pares = [];
   for (let i = 0; i < lista.length; i += 2) pares.push([lista[i], lista[i+1]||null]);
 
@@ -3517,7 +3516,36 @@ function imprimirCarteles() {
   if (!win) { toast('⚠️ Permitir ventanas emergentes en Chrome'); return; }
   win.document.write(html);
   win.document.close();
-  document.getElementById('m-carteles').style.display = 'none';
+}
+
+async function imprimirCarteles() {
+  const lista = _carteles.filter(c => c.ok);
+  if (!lista.length) { toast('⚠️ Seleccioná al menos un producto'); return; }
+
+  const productos = lista.map(c => ({
+    producto: c.producto,
+    precio: Number(c.precio) || 0,
+    porUnidad: !!c.cu
+  }));
+
+  try {
+    toast('🖨️ Enviando carteles a la PC...');
+    const res = await fetch(PRINT_SERVER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ productos })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) throw new Error(data.error || data.mensaje || 'No se pudo imprimir');
+
+    document.getElementById('m-carteles').style.display = 'none';
+    toast('✅ Carteles enviados a la PC');
+  } catch (err) {
+    console.error('Error al enviar a servidor de impresión:', err);
+    toast('⚠️ No conectó con la PC. Abro impresión local.', 3500);
+    _imprimirCartelesNavegador(lista);
+    document.getElementById('m-carteles').style.display = 'none';
+  }
 }
 
 </script>
