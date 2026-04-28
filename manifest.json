@@ -1,27 +1,15 @@
 {
-  "name": "VerdApp – Gestión Verdulería",
+  "name": "VerdApp",
   "short_name": "VerdApp",
-  "description": "Gestión de verdulería: pesos, precios, compras y resumen semanal",
-  "start_url": ".",
-  "scope": ".",
+  "description": "Gestión de pesos, precios y carteles para verdulería",
+  "start_url": "./index.html?v=20260428-carteles",
+  "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#111111",
-  "theme_color": "#111111",
-  "lang": "es",
+  "theme_color": "#0a1a0a",
+  "lang": "es-PY",
   "icons": [
-    {
-      "src": "icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    }
-  ],
-  "categories": ["business", "finance", "productivity"]
+    {"src": "icons/icon.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "any maskable"}
+  ]
 }
