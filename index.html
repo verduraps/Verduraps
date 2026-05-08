@@ -239,12 +239,14 @@ const WA_NOMBRES = ['0991378503','0991656990','0983493424'];
 ═══════════════════════════════════════════════════════ */
 const KEY_GESTION = 'verdapp_v4';
 const KEY_MAYORISTA = 'verdapp_mayorista_v1';
+const KEY_CORRECCIONES = 'verdapp_correcciones_v1';
 const KEY_PESOS   = 'verdapp_pesos_v2';
 const KEY_PRECIOS = 'verdapp_precios_v1'; // memoria de precios
 const KEY_WMEM    = 'verdapp_wmem_v1';    // memoria de pesos
 
 let db = {compras:[],gastos:[],ventas:[]};
 let dbMay = {clientes:[], pedidos:[], reclamos:[]};
+let corrMemory = {}; // {nombre: {total: N, correcciones: [{qty, tipo_precio, fecha}]}}
 let pesoRows = [];
 let margen = 1.3;
 let priceMemory = {};
@@ -262,6 +264,7 @@ function loadAll() {
   } catch(e){}
   try { const r=localStorage.getItem(KEY_PRECIOS); if(r) priceMemory=JSON.parse(r); } catch(e){}
   try { const r=localStorage.getItem(KEY_MAYORISTA); if(r) dbMay=JSON.parse(r); } catch(e){}
+  try { const r=localStorage.getItem(KEY_CORRECCIONES); if(r) corrMemory=JSON.parse(r); } catch(e){}
   try { const r=localStorage.getItem(KEY_WMEM);    if(r) weightMemory=JSON.parse(r); } catch(e){}
   if(!pesoRows.length) initPesoRows();
 }
@@ -493,13 +496,16 @@ const PRICE_HINTS = [
   {keys:['mandarina argentina'], min:160000, max:250000},
   {keys:['mandarina bahia'], min:160000, max:250000},
   {keys:['mandarina'], min:160000, max:240000},
+  {keys:['naranja lindo','naranja ombligo','naranja economica'], min:7000, max:12000},
   {keys:['naranja'], min:160000, max:230000},
   {keys:['manzana roja grande','manzana roja'], min:280000, max:360000},
   {keys:['manzana verde'], min:220000, max:320000},
   {keys:['pera'], min:160000, max:220000},
   {keys:['uva'], min:180000, max:260000},
   {keys:['ciruela'], min:180000, max:260000},
-  {keys:['pina grande','pina'], min:80000, max:180000},
+  {keys:['pina de 24','piña de 24'], min:60000, max:100000},
+  {keys:['pina de 18','piña de 18'], min:70000, max:120000},
+  {keys:['pina grande','piña grande','pina'], min:80000, max:180000},
   {keys:['kiwi'], min:250000, max:350000},
   {keys:['melon nacional'], min:45000, max:65000},
   {keys:['melon japones'], min:150000, max:250000},
@@ -519,6 +525,11 @@ const PRICE_HINTS = [
   {keys:['choclo'], min:10000, max:20000},
   {keys:['poroto rojo','poroto'], min:10000, max:25000},
   {keys:['ajo'], min:150000, max:220000},
+  {keys:['brocoli','brócoli'], min:30000, max:60000},
+  {keys:['coliflor'], min:30000, max:70000},
+  {keys:['arandanos','arándanos'], min:180000, max:280000},
+  {keys:['mango rosa','mango'], min:150000, max:220000},
+  {keys:['mandarina frutika','frutika'], min:60000, max:100000},
   {keys:['acelga'], min:25000, max:45000},
   {keys:['kuratu','perejil'], min:7000, max:25000},
   {keys:['cebollita','verdeo'], min:15000, max:35000},
@@ -546,8 +557,26 @@ function interpretarPrecioCantidad(nombre,cantidad,valorLeido){
   const unitAsUnit=raw;
   const unitAsTotal=Math.round(raw/qty);
 
-  // Verdeos por docena/lote: cuando vienen 12, 24, 36 o cantidades altas, casi siempre
-  // el valor leído corresponde al TOTAL del lote y no al precio unitario.
+  // MEMORIA DE CORRECCIONES: si el usuario ya corrigió este producto antes → aplicar
+  const correccionAprendida = getCorreccionAprendida(nombre, qty);
+  if(correccionAprendida === 'total'){
+    return {
+      precioUnit: unitAsTotal,
+      precioTotal: raw,
+      tipo_precio: 'total',
+      confianza: 'alta'  // alta porque viene de corrección manual del usuario
+    };
+  }
+  if(correccionAprendida === 'unitario'){
+    return {
+      precioUnit: unitAsUnit,
+      precioTotal: unitAsUnit * qty,
+      tipo_precio: 'unitario',
+      confianza: 'alta'
+    };
+  }
+
+  // Verdeos por docena/lote
   if(isVerdeo && qty>=12){
     let conf='alta';
     if(hint){
@@ -555,53 +584,79 @@ function interpretarPrecioCantidad(nombre,cantidad,valorLeido){
       const dentroUnit = unitAsUnit>=hint.min && unitAsUnit<=hint.max;
       if(!dentroLote && dentroUnit) conf='media';
     }
-    return {
-      precioUnit:unitAsTotal,
-      precioTotal:raw,
-      tipo_precio:'total',
-      confianza:conf
-    };
+    return {precioUnit:unitAsTotal,precioTotal:raw,tipo_precio:'total',confianza:conf};
   }
 
-  if(!hint){
-    return {precioUnit:unitAsUnit,precioTotal:unitAsUnit*qty,tipo_precio:'unitario',confianza:'media'};
-  }
-  const avg=(hint.min+hint.max)/2;
-  const score=(unit,mode)=>{
-    let s=0;
-    if(unit>=hint.min && unit<=hint.max){
-      s += 100;
-      s -= Math.abs(unit-avg)/avg*20;
-    } else {
-      const dist = unit<hint.min ? (hint.min-unit)/hint.min : (unit-hint.max)/hint.max;
-      s -= dist*120;
+  // REGLA CLAVE: si el valor leído está dentro del rango hint Y
+  // unitAsUnit*qty produciría un total absurdo (>3x el max esperado),
+  // entonces el valor leído ES el total, no el unitario.
+  if(hint){
+    const totalSiUnit = unitAsUnit * qty;
+    const maxEsperado = hint.max * qty;
+    const unitAsUnitEnRango = unitAsUnit >= hint.min && unitAsUnit <= hint.max;
+    const unitAsTotalEnRango = unitAsTotal >= hint.min && unitAsTotal <= hint.max;
+    const rawEnRango = raw >= hint.min && raw <= hint.max * qty * 1.1;
+
+    // Si unitAsUnit está fuera del rango pero unitAsTotal sí está → es total
+    if(!unitAsUnitEnRango && unitAsTotalEnRango){
+      return {
+        precioUnit:unitAsTotal,
+        precioTotal:raw,
+        tipo_precio:'total',
+        confianza:'alta'
+      };
     }
-    if(mode==='total'){
-      if(raw>hint.max*1.25) s += 30;
-      if(unit>=hint.min && unit<=hint.max) s += 10;
-    } else {
-      if(raw>=hint.min && raw<=hint.max) s += 10;
-      if(raw>hint.max*1.7) s -= 50;
+
+    // Si ambos están en rango, usar score
+    const avg=(hint.min+hint.max)/2;
+    const score=(unit,mode)=>{
+      let s=0;
+      if(unit>=hint.min && unit<=hint.max){
+        s += 100;
+        s -= Math.abs(unit-avg)/avg*20;
+      } else {
+        const dist = unit<hint.min ? (hint.min-unit)/hint.min : (unit-hint.max)/hint.max;
+        s -= dist*120;
+      }
+      if(mode==='total'){
+        if(raw>hint.max*1.25) s += 30;
+        if(unit>=hint.min && unit<=hint.max) s += 10;
+      } else {
+        if(raw>=hint.min && raw<=hint.max) s += 10;
+        if(raw>hint.max*1.7) s -= 50;
+      }
+      if(qty%12===0 && mode==='total') s += 12;
+      return s;
+    };
+    const scoreUnit=score(unitAsUnit,'unitario');
+    const scoreTotal=score(unitAsTotal,'total');
+    if(scoreTotal>scoreUnit){
+      return {
+        precioUnit:unitAsTotal,
+        precioTotal:raw,
+        tipo_precio:'total',
+        confianza:Math.abs(scoreTotal-scoreUnit)>=25?'alta':'media'
+      };
     }
-    if(qty%12===0 && mode==='total') s += 12;
-    return s;
-  };
-  const scoreUnit=score(unitAsUnit,'unitario');
-  const scoreTotal=score(unitAsTotal,'total');
-  if(scoreTotal>scoreUnit){
     return {
-      precioUnit:unitAsTotal,
-      precioTotal:raw,
-      tipo_precio:'total',
+      precioUnit:unitAsUnit,
+      precioTotal:unitAsUnit*qty,
+      tipo_precio:'unitario',
       confianza:Math.abs(scoreTotal-scoreUnit)>=25?'alta':'media'
     };
   }
-  return {
-    precioUnit:unitAsUnit,
-    precioTotal:unitAsUnit*qty,
-    tipo_precio:'unitario',
-    confianza:Math.abs(scoreTotal-scoreUnit)>=25?'alta':'media'
-  };
+
+  // Sin hint: si el raw*qty da un total absurdamente alto comparado
+  // con precios aprendidos, intentar interpretar como total
+  const aprendido = getPriceHintAprendido(nombre);
+  if(aprendido){
+    const unitAsTotalApr = Math.round(raw/qty);
+    if(unitAsTotalApr >= aprendido.min && unitAsTotalApr <= aprendido.max){
+      return {precioUnit:unitAsTotalApr,precioTotal:raw,tipo_precio:'total',confianza:'alta'};
+    }
+  }
+
+  return {precioUnit:unitAsUnit,precioTotal:unitAsUnit*qty,tipo_precio:'unitario',confianza:'media'};
 }
 
 function semana(){
@@ -1164,13 +1219,35 @@ function parsearLocal(texto){
     const reserv=new Set(['kilo','kilos','kg','caja','cajas','unidad','unidades','und',
       'paquete','paquetes','docena','docenas','sin','precio','pendiente','danado',
       'falta','faltante','del','la','el','los','las','uno','una',...DS]);
-    const nombreTokens=t.split(/\s+/).filter(x=>!reserv.has(x)&&!/^\d+(\.\d+)?$/.test(x)&&!DS.some(d=>x.startsWith(d))&&x.length>1);
+    // Detectar productos con número en el nombre (piña de 18, piña de 24, locote x 9, etc.)
+    // Si el texto tiene patrón "producto de/x número número" → el primer número es parte del nombre
+    const nombreConNum = /^(pina|piña|naranja|brocoli|brócoli|coliflor)\s+(de\s+|x\s*)?\d+/i.test(t);
+    // Extraer nombre: si tiene número en nombre, preservar ese número
+    let nombreTokens;
+    if(nombreConNum){
+      // Tomar todo hasta el último número como nombre
+      const partes = t.split(/\s+/);
+      let ultimoNumIdx = -1;
+      for(let i=0;i<partes.length;i++){if(/^\d+$/.test(partes[i]))ultimoNumIdx=i;}
+      // Si hay más de un número, el nombre incluye hasta el penúltimo número
+      const allNums = partes.filter(p=>/^\d+(\.\d+)?$/.test(p));
+      if(allNums.length>1){
+        // nombre = todo excepto el último número (que es el precio)
+        nombreTokens = partes.filter((x,i)=>i!==partes.lastIndexOf(allNums[allNums.length-1])).filter(x=>!reserv.has(x)&&x.length>1);
+      } else {
+        nombreTokens = partes.filter(x=>!reserv.has(x)&&!/^\d+(\.\d+)?$/.test(x)&&x.length>1);
+      }
+    } else {
+      nombreTokens=t.split(/\s+/).filter(x=>!reserv.has(x)&&!/^\d+(\.\d+)?$/.test(x)&&!DS.some(d=>x.startsWith(d))&&x.length>1);
+    }
     // Reconstruir nombre completo preservando orden original
     const nombre=nombreTokens.join(' ').trim()||'producto';
     // Usar tipo aprendido si no se detectó explícitamente en el texto
     const tipoExplicito=Object.keys(tm).some(k=>t.includes(k));
     if(!tipoExplicito){ const tipoMem=getTipoAprendido(nombre); if(tipoMem) tipo=tipoMem; }
-    const nums=(t.match(/\d+(\.\d+)?/g)||[]).map(Number);
+    // Extraer números: si el nombre tiene un número (piña de 18), excluirlo de nums
+    const todosNums=(t.match(/\d+(\.\d+)?/g)||[]).map(Number);
+    const nums = nombreConNum && todosNums.length>1 ? todosNums.slice(1) : todosNums;
     let cantidad=1,precioUnit=0,precioTotal=0,tipo_precio='unitario',confianza='media';
     if(sinPrecio){
       cantidad=nums[0]||1;
@@ -1285,6 +1362,39 @@ function mostrarPrevTexto(items){
     </button>`;
 }
 
+function saveCorrMemory(){
+  localStorage.setItem(KEY_CORRECCIONES, JSON.stringify(corrMemory));
+}
+
+// Guarda que para este producto, cuando viene con esta cantidad, el valor es TOTAL
+function aprenderCorreccion(nombre, cantidad, tipo_precio){
+  if(!nombre || cantidad <= 0) return;
+  const key = normalizarTexto(nombre);
+  if(!corrMemory[key]) corrMemory[key] = {correcciones:[]};
+  // Guardar corrección reciente (máximo 10)
+  corrMemory[key].correcciones.push({qty: cantidad, tipo_precio, fecha: hoy()});
+  if(corrMemory[key].correcciones.length > 10)
+    corrMemory[key].correcciones.shift();
+  // Calcular tipo dominante
+  const totales = corrMemory[key].correcciones.filter(x=>x.tipo_precio==='total').length;
+  const unitarios = corrMemory[key].correcciones.filter(x=>x.tipo_precio==='unitario').length;
+  corrMemory[key].tipoDefault = totales >= unitarios ? 'total' : 'unitario';
+  saveCorrMemory();
+}
+
+// Consulta si hay corrección aprendida para este producto+cantidad
+function getCorreccionAprendida(nombre, cantidad){
+  const key = normalizarTexto(nombre);
+  const mem = corrMemory[key];
+  if(!mem || !mem.correcciones.length) return null;
+  // Buscar correcciones con misma cantidad o similar (±1)
+  const relevantes = mem.correcciones.filter(x => Math.abs(x.qty - cantidad) <= 1);
+  if(!relevantes.length) return mem.tipoDefault || null;
+  const totales = relevantes.filter(x=>x.tipo_precio==='total').length;
+  const unitarios = relevantes.filter(x=>x.tipo_precio==='unitario').length;
+  return totales >= unitarios ? 'total' : 'unitario';
+}
+
 function recalcPrevRow(i, changed){
   const it=prevTexto[i];
   const puEl=document.getElementById('pu-'+i);
@@ -1301,6 +1411,8 @@ function recalcPrevRow(i, changed){
     it.precioUnit=it.cantidad>0?Math.round(it.precioTotal/it.cantidad):it.precioTotal;
     it.pendiente=it.precioTotal===0;
     puEl.value=it.precioUnit;
+    // Aprender que este producto viene como TOTAL
+    aprenderCorreccion(it.nombre, it.cantidad, 'total');
   }
 }
 
@@ -3478,9 +3590,10 @@ function _renderCarteles() {
     </div>`).join('');
 }
 
-const PRINT_SERVER_URL = 'http://192.168.18.125:3456/imprimir';
+function imprimirCarteles() {
+  const lista = _carteles.filter(c => c.ok);
+  if (!lista.length) { toast('⚠️ Seleccioná al menos un producto'); return; }
 
-function _imprimirCartelesNavegador(lista) {
   const pares = [];
   for (let i = 0; i < lista.length; i += 2) pares.push([lista[i], lista[i+1]||null]);
 
@@ -3516,36 +3629,7 @@ function _imprimirCartelesNavegador(lista) {
   if (!win) { toast('⚠️ Permitir ventanas emergentes en Chrome'); return; }
   win.document.write(html);
   win.document.close();
-}
-
-async function imprimirCarteles() {
-  const lista = _carteles.filter(c => c.ok);
-  if (!lista.length) { toast('⚠️ Seleccioná al menos un producto'); return; }
-
-  const productos = lista.map(c => ({
-    producto: c.producto,
-    precio: Number(c.precio) || 0,
-    porUnidad: !!c.cu
-  }));
-
-  try {
-    toast('🖨️ Enviando carteles a la PC...');
-    const res = await fetch(PRINT_SERVER_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ productos })
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.ok === false) throw new Error(data.error || data.mensaje || 'No se pudo imprimir');
-
-    document.getElementById('m-carteles').style.display = 'none';
-    toast('✅ Carteles enviados a la PC');
-  } catch (err) {
-    console.error('Error al enviar a servidor de impresión:', err);
-    toast('⚠️ No conectó con la PC. Abro impresión local.', 3500);
-    _imprimirCartelesNavegador(lista);
-    document.getElementById('m-carteles').style.display = 'none';
-  }
+  document.getElementById('m-carteles').style.display = 'none';
 }
 
 </script>
